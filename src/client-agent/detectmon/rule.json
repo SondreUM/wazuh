@@ -1,0 +1,14 @@
+{
+    "id": 1,
+    "name": "sedexp",
+    "description": "Detects changes to udev rules, used by sedexp malware",
+    "before": 5,
+    "after": 5,
+    "conditions": {
+        "startswith": "File '/etc/udev/rules.d/"
+    },
+    "ext": {
+        "tag": "linux",
+        "mitre": "T1546.017"
+    }
+}

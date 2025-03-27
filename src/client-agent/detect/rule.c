@@ -110,7 +110,7 @@ detect_rule_condition_t** parse_conditions(cJSON* json_condition)
         match_rule_t matcher = num_matchers; // Invalid by default
         for (int i = 0; i < num_matchers; i++)
         {
-            if (strcmp(matcher_str, match_rule_str[i]) == 0)
+            if (strcmp(matcher_str, DETECT_MATCH_STR[i]) == 0)
             {
                 matcher = (match_rule_t)i;
                 break;
@@ -458,4 +458,12 @@ void parse_rules(const char* rule_dir, detect_rule_t** rules)
     }
 
     closedir(dir);
+}
+
+char* format_rule(detect_rule_t* rule)
+{
+    if (!rule)
+        return NULL;
+
+    return NULL;
 }

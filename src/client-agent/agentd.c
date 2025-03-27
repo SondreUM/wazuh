@@ -8,12 +8,12 @@
  * Foundation
  */
 
-#include "shared.h"
 #include "agentd.h"
 #include "os_net/os_net.h"
+#include "shared.h"
 
 /* Start the agent daemon */
-void AgentdStart(int uid, int gid, const char *user, const char *group)
+void AgentdStart(int uid, int gid, const char* user, const char* group)
 {
     int rc = 0;
     int maxfd = 0;
@@ -29,26 +29,33 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
     sender_init();
 
     /* Going Daemon */
-    if (!run_foreground) {
+    if (!run_foreground)
+    {
         nowDaemon();
         goDaemon();
     }
 
     /* Set group ID */
-    if (Privsep_SetGroup(gid) < 0) {
+    if (Privsep_SetGroup(gid) < 0)
+    {
         merror_exit(SETGID_ERROR, group, errno, strerror(errno));
     }
 
-    if (Privsep_SetUser(uid) < 0) {
+    if (Privsep_SetUser(uid) < 0)
+    {
         merror_exit(SETUID_ERROR, user, errno, strerror(errno));
     }
 
-    if(agt->enrollment_cfg && agt->enrollment_cfg->enabled) {
+    if (agt->enrollment_cfg && agt->enrollment_cfg->enabled)
+    {
         // If autoenrollment is enabled, we will avoid exit if there is no valid key
         OS_PassEmptyKeyfile();
-    } else {
+    }
+    else
+    {
         /* Check auth keys */
-        if (!OS_CheckKeys()) {
+        if (!OS_CheckKeys())
+        {
             merror_exit(AG_NOKEYS_EXIT);
         }
     }
@@ -58,13 +65,19 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
     OS_ReadKeys(&keys, W_DUAL_KEY, 0);
 
     minfo("Using notify time: %d and max time to reconnect: %d", agt->notify_time, agt->max_time_reconnect_try);
-    if (agt->force_reconnect_interval) {
-        minfo("Using force reconnect interval, Wazuh Agent will reconnect every %ld %s", w_seconds_to_time_value(agt->force_reconnect_interval), w_seconds_to_time_unit(agt->force_reconnect_interval, TRUE));
+    if (agt->force_reconnect_interval)
+    {
+        minfo("Using force reconnect interval, Wazuh Agent will reconnect every %ld %s",
+              w_seconds_to_time_value(agt->force_reconnect_interval),
+              w_seconds_to_time_unit(agt->force_reconnect_interval, TRUE));
     }
 
-    if (!getuname()) {
+    if (!getuname())
+    {
         merror(MEM_ERROR, errno, strerror(errno));
-    } else {
+    }
+    else
+    {
         minfo("Version detected -> %s", getuname());
     }
 
@@ -72,7 +85,8 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
     os_setwait();
 
     /* Create the queue and read from it. Exit if fails. */
-    if ((agt->m_queue = StartMQ(DEFAULTQUEUE, READ, 0)) < 0) {
+    if ((agt->m_queue = StartMQ(DEFAULTQUEUE, READ, 0)) < 0)
+    {
         merror_exit(QUEUE_ERROR, DEFAULTQUEUE, strerror(errno));
     }
 
@@ -88,7 +102,8 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
     agt->sock = -1;
 
     /* Create PID file */
-    if (CreatePID(ARGV0, getpid()) < 0) {
+    if (CreatePID(ARGV0, getpid()) < 0)
+    {
         merror_exit(PID_ERROR);
     }
 
@@ -102,17 +117,21 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
 
     /* Launch rotation thread */
     rotate_log = getDefine_Int("monitord", "rotate_log", 0, 1);
-    if (rotate_log) {
-        w_create_thread(w_rotate_log_thread, (void *)NULL);
+    if (rotate_log)
+    {
+        w_create_thread(w_rotate_log_thread, (void*)NULL);
     }
 
     /* Launch dispatch thread */
-    if (agt->buffer){
+    if (agt->buffer)
+    {
 
         buffer_init();
 
-        w_create_thread(dispatch_buffer, (void *)NULL);
-    } else {
+        w_create_thread(dispatch_buffer, (void*)NULL);
+    }
+    else
+    {
         minfo(DISABLED_BUFFER);
     }
 
@@ -121,15 +140,18 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
     w_create_thread(state_main, NULL);
 
     /* Set max fd for select */
-    if (agt->sock > maxfd) {
+    if (agt->sock > maxfd)
+    {
         maxfd = agt->sock;
     }
 
     /* Connect to the execd queue */
-    if (agt->execdq == 0) {
-        if ((agt->execdq = StartMQ(EXECQUEUE, WRITE, 1)) < 0) {
+    if (agt->execdq == 0)
+    {
+        if ((agt->execdq = StartMQ(EXECQUEUE, WRITE, 1)) < 0)
+        {
             minfo("Unable to connect to the active response "
-                   "queue (disabled).");
+                  "queue (disabled).");
             agt->execdq = -1;
         }
     }
@@ -137,7 +159,7 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
     start_agent(1);
 
     os_delwait();
-    w_agentd_state_update(UPDATE_STATUS, (void *) GA_STATUS_ACTIVE);
+    w_agentd_state_update(UPDATE_STATUS, (void*)GA_STATUS_ACTIVE);
 
     // Ignore SIGPIPE signal to prevent the process from crashing
     struct sigaction act;
@@ -149,6 +171,12 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
     req_init();
     w_create_thread(req_receiver, NULL);
 
+    // start dynamic detection module
+#ifdef DYNAMIC_DETECT
+    detect_init();
+    w_create_thread(detect_main, NULL);
+#endif
+
     /* Send agent stopped message at exit */
     atexit(send_agent_stopped_message);
 
@@ -159,12 +187,14 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
     maxfd++;
 
     /* Monitor loop */
-    while (1) {
+    while (1)
+    {
 
         /* Continuously send notifications */
         run_notify();
 
-        if (agt->sock > maxfd - 1) {
+        if (agt->sock > maxfd - 1)
+        {
             maxfd = agt->sock + 1;
         }
 
@@ -178,58 +208,74 @@ void AgentdStart(int uid, int gid, const char *user, const char *group)
 
         /* Wait with a timeout for any descriptor */
         rc = select(maxfd, &fdset, NULL, NULL, &fdtimeout);
-        if (rc == -1) {
+        if (rc == -1)
+        {
             merror_exit(SELECT_ERROR, errno, strerror(errno));
-        } else if (rc == 0) {
+        }
+        else if (rc == 0)
+        {
             continue;
         }
 
         /* For the receiver */
-        if (FD_ISSET(agt->sock, &fdset)) {
-            if (receive_msg() < 0) {
-                w_agentd_state_update(UPDATE_STATUS, (void *) GA_STATUS_NACTIVE);
+        if (FD_ISSET(agt->sock, &fdset))
+        {
+            if (receive_msg() < 0)
+            {
+                w_agentd_state_update(UPDATE_STATUS, (void*)GA_STATUS_NACTIVE);
                 merror(LOST_ERROR);
                 os_setwait();
                 start_agent(0);
                 minfo(SERVER_UP);
                 os_delwait();
-                w_agentd_state_update(UPDATE_STATUS, (void *) GA_STATUS_ACTIVE);
+                w_agentd_state_update(UPDATE_STATUS, (void*)GA_STATUS_ACTIVE);
             }
         }
 
         /* For the forwarder */
-        if (FD_ISSET(agt->m_queue, &fdset)) {
+        if (FD_ISSET(agt->m_queue, &fdset))
+        {
             EventForward();
         }
     }
 }
 
 #if !defined(HPUX) && !defined(AIX) && !defined(SOLARIS)
-bool check_uninstall_permission(const char *token, const char *host, bool ssl_verify) {
+bool check_uninstall_permission(const char* token, const char* host, bool ssl_verify)
+{
     char url[OS_SIZE_8192];
     snprintf(url, sizeof(url), "https://%s/agents/uninstall", host);
 
-    char header[OS_SIZE_8192] = { '\0' };
+    char header[OS_SIZE_8192] = {'\0'};
     snprintf(header, sizeof(header), "Authorization: Bearer %s", token);
 
-    char* headers[] = { NULL, NULL };
+    char* headers[] = {NULL, NULL};
     os_strdup(header, headers[0]);
 
-    curl_response *response = wurl_http_request(WURL_GET_METHOD, headers, url, NULL, OS_SIZE_8192, 30, NULL, ssl_verify);
+    curl_response* response =
+        wurl_http_request(WURL_GET_METHOD, headers, url, NULL, OS_SIZE_8192, 30, NULL, ssl_verify);
 
-    if (response) {
-        if (response->status_code == 200) {
+    if (response)
+    {
+        if (response->status_code == 200)
+        {
             minfo(AG_UNINSTALL_VALIDATION_GRANTED);
             wurl_free_response(response);
             os_free(headers[0]);
             return false;
-        } else if (response->status_code == 403) {
+        }
+        else if (response->status_code == 403)
+        {
             minfo(AG_UNINSTALL_VALIDATION_DENIED);
-        } else {
+        }
+        else
+        {
             merror(AG_API_ERROR_CODE, response->status_code);
         }
         wurl_free_response(response);
-    } else {
+    }
+    else
+    {
         merror(AG_REQUEST_FAIL);
     }
 
@@ -237,44 +283,62 @@ bool check_uninstall_permission(const char *token, const char *host, bool ssl_ve
     return true;
 }
 
-char* authenticate_and_get_token(const char *userpass, const char *host, bool ssl_verify) {
+char* authenticate_and_get_token(const char* userpass, const char* host, bool ssl_verify)
+{
     char url[OS_SIZE_8192];
-    char *token = NULL;
-    char* headers[] = { NULL };
+    char* token = NULL;
+    char* headers[] = {NULL};
 
     snprintf(url, sizeof(url), "https://%s/security/user/authenticate?raw=true", host);
-    curl_response *response = wurl_http_request(WURL_POST_METHOD, headers, url, NULL, OS_SIZE_8192, 30, userpass, ssl_verify);
+    curl_response* response =
+        wurl_http_request(WURL_POST_METHOD, headers, url, NULL, OS_SIZE_8192, 30, userpass, ssl_verify);
 
-    if (response) {
-        if (response->status_code == 200) {
+    if (response)
+    {
+        if (response->status_code == 200)
+        {
             os_strdup(response->body, token);
-        } else {
+        }
+        else
+        {
             merror(AG_API_ERROR_CODE, response->status_code);
         }
         wurl_free_response(response);
-    } else {
+    }
+    else
+    {
         merror(AG_REQUEST_FAIL);
     }
 
     return token;
 }
 
-bool package_uninstall_validation(const char *uninstall_auth_token, const char *uninstall_auth_login, const char *uninstall_auth_host, bool ssl_verify) {
+bool package_uninstall_validation(const char* uninstall_auth_token,
+                                  const char* uninstall_auth_login,
+                                  const char* uninstall_auth_host,
+                                  bool ssl_verify)
+{
     bool validate_result = true;
 
     minfo(AG_UNINSTALL_VALIDATION_START);
-    if (uninstall_auth_token) {
+    if (uninstall_auth_token)
+    {
         validate_result = check_uninstall_permission(uninstall_auth_token, uninstall_auth_host, ssl_verify);
-        if (validate_result) {
+        if (validate_result)
+        {
             return validate_result;
         }
     }
-    if (uninstall_auth_login) {
-        char *new_token = authenticate_and_get_token(uninstall_auth_login, uninstall_auth_host, ssl_verify);
-        if (new_token) {
+    if (uninstall_auth_login)
+    {
+        char* new_token = authenticate_and_get_token(uninstall_auth_login, uninstall_auth_host, ssl_verify);
+        if (new_token)
+        {
             validate_result = check_uninstall_permission(new_token, uninstall_auth_host, ssl_verify);
             os_free(new_token);
-        } else {
+        }
+        else
+        {
             merror(AG_TOKEN_FAIL, uninstall_auth_login);
         }
     }

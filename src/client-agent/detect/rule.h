@@ -2,6 +2,10 @@
 #define RULE_H
 
 #include <cjson/cJSON.h>
+#include <time.h>
+
+const char RULE_INFO[] = "RuleID: %d, Name: %s, Description: %s, Before: %d, After: %d";
+const char* DETECT_MATCH_STR[] = {"startswith", "endswith", "contains", "regex"};
 
 typedef enum match_rule
 {
@@ -12,8 +16,6 @@ typedef enum match_rule
 
     num_matchers
 } match_rule_t;
-
-const char* match_rule_str[] = {"startswith", "endswith", "contains", "regex"};
 
 /**
  * @brief Rule extensions
@@ -41,8 +43,8 @@ typedef struct detect_rule_condition
 typedef struct detect_rule
 {
     int id;                               // unique id
-    int before;                           // activation windows ahead of the event
-    int after;                            // activation windows after the event
+    time_t before;                        // activation windows ahead of the event
+    time_t after;                         // activation windows after the event
     char* name;                           // rule name
     char* description;                    // rule description
     detect_rule_condition_t** conditions; // rule conditions
@@ -80,5 +82,12 @@ void parse_rules(const char* rule_dir, detect_rule_t** rules);
  * @param rule The rule to free
  */
 void free_rule(detect_rule_t* rule);
+
+/**
+ * @brief Format a string with rule information
+ *
+ * @param rule The rule to print
+ */
+char* rule_info(detect_rule_t* rule);
 
 #endif /* RULE_H */

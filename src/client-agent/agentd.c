@@ -9,6 +9,7 @@
  */
 
 #include "agentd.h"
+#include "detect/detect.h"
 #include "os_net/os_net.h"
 #include "shared.h"
 
@@ -174,7 +175,7 @@ void AgentdStart(int uid, int gid, const char* user, const char* group)
     // start dynamic detection module
 #ifdef DYNAMIC_DETECT
     detect_init();
-    w_create_thread(detect_main, NULL);
+    w_create_thread(w_detectmon_thread, (void*)NULL);
 #endif
 
     /* Send agent stopped message at exit */

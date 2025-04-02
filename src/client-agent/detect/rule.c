@@ -29,6 +29,139 @@
 }
  */
 
+detect_rule_t* parse_rule(const char* json_string)
+{
+    cJSON* root = cJSON_Parse(json_string);
+    if (!root)
+        return NULL;
+
+    detect_rule_t* rule = calloc(1, sizeof(detect_rule_t));
+    if (!rule)
+    {
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    // Parse primitive fields
+    rule->id = cJSON_GetObjectItem(root, "id")->valueint;
+    rule->before = cJSON_GetObjectItem(root, "before")->valueint;
+    rule->after = cJSON_GetObjectItem(root, "after")->valueint;
+
+    cJSON* name = cJSON_GetObjectItem(root, "name");
+    rule->name = strdup(name->valuestring);
+
+    cJSON* desc = cJSON_GetObjectItem(root, "description");
+    rule->description = strdup(desc->valuestring);
+
+    // Parse conditions
+    cJSON* conditions = cJSON_GetObjectItem(root, "conditions");
+    rule->conditions = calloc(1, sizeof(detect_rule_condition_t*) * (cJSON_GetArraySize(conditions) + 1));
+
+    int cond_idx = 0;
+    cJSON* cond_item;
+    cJSON_ArrayForEach(cond_item, conditions)
+    {
+        detect_rule_condition_t* cond = calloc(1, sizeof(detect_rule_condition_t));
+
+        if (strcmp(cond_item->string, "startswith") == 0)
+        {
+            cond->matcher = STARTSWITH;
+        }
+        else if (strcmp(cond_item->string, "endswith") == 0)
+        {
+            cond->matcher = ENDSWITH;
+        }
+        else if (strcmp(cond_item->string, "contains") == 0)
+        {
+            cond->matcher = CONTAINS;
+        }
+        else if (strcmp(cond_item->string, "regex") == 0)
+        {
+            cond->matcher = REGEX;
+        }
+
+        cond->string = strdup(cond_item->valuestring);
+        rule->conditions[cond_idx++] = cond;
+    }
+
+    // Parse extensions
+    cJSON* ext = cJSON_GetObjectItem(root, "ext");
+    rule->ext = calloc(1, sizeof(detect_rule_extension_t*) * (cJSON_GetArraySize(ext) + 1));
+
+    int ext_idx = 0;
+    cJSON* ext_item;
+    cJSON_ArrayForEach(ext_item, ext)
+    {
+        detect_rule_extension_t* extension = calloc(1, sizeof(detect_rule_extension_t));
+        extension->field = strdup(ext_item->string);
+        extension->value = strdup(ext_item->valuestring);
+        rule->ext[ext_idx++] = extension;
+    }
+
+    cJSON_Delete(root);
+    return rule;
+}
+
+void parse_rules(const char* rule_dir, detect_rule_t** rules)
+{
+    DIR* dir;
+    struct dirent* ent;
+    size_t capacity = 32;
+    size_t count = 0;
+
+    *rules = calloc(capacity, sizeof(detect_rule_t*));
+    if (!*rules)
+        return;
+
+    if ((dir = opendir(rule_dir)) != NULL)
+    {
+        while ((ent = readdir(dir)) != NULL)
+        {
+            // Check for .json extension
+            char* ext = strrchr(ent->d_name, '.');
+            if (!ext || strcmp(ext, ".json") != 0)
+                continue;
+
+            // Build full path
+            char path[PATH_MAX];
+            snprintf(path, sizeof(path), "%s/%s", rule_dir, ent->d_name);
+
+            // Open and read file
+            FILE* fp = fopen(path, "r");
+            if (!fp)
+                continue;
+
+            fseek(fp, 0, SEEK_END);
+            long len = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+
+            char* json_data = malloc(len + 1);
+            fread(json_data, 1, len, fp);
+            json_data[len] = '\0';
+            fclose(fp);
+
+            // Parse and store rule
+            detect_rule_t* rule = parse_rule(json_data);
+            free(json_data);
+
+            if (rule)
+            {
+                // Resize array if needed
+                if (count >= capacity - 1)
+                {
+                    capacity *= 2;
+                    *rules = realloc(*rules, capacity * sizeof(detect_rule_t*));
+                }
+                rules[count++] = rule;
+            }
+        }
+        closedir(dir);
+
+        // Null-terminate array
+        rules[count] = NULL;
+    }
+}
+
 /**
  * @brief free a rule and all its resources
  *
@@ -70,404 +203,29 @@ void free_rule(detect_rule_t* rule)
 }
 
 /**
- * @brief Parse a condition from JSON
+ * @brief formats a rule into a printable string
  *
- * @param json_condition The JSON object containing the condition
- * @return detect_rule_condition_t** Array of conditions (null-terminated)
+ * @param rule the rule to format
+ * @return char* formatted string, or NULL on failure
+ * caller is responsible for freeing the string
+ * @note the string is formatted as follows:
+ * "RuleID: %d, Name: %s, Description: %s, Before: %ld, After: %ld"
  */
-detect_rule_condition_t** parse_conditions(cJSON* json_condition)
-{
-    if (!json_condition || !cJSON_IsObject(json_condition))
-    {
-        return NULL;
-    }
-
-    cJSON* child = NULL;
-    detect_rule_condition_t** conditions;
-    int count = cJSON_GetArraySize(json_condition);
-
-    // Allocate memory for the conditions array (plus 1 for NULL terminator)
-    conditions = (detect_rule_condition_t**)malloc((count + 1) * sizeof(detect_rule_condition_t*));
-    if (conditions == NULL)
-    {
-        merror("Failed to allocate memory\n");
-        return NULL;
-    }
-
-    // Initialize to NULL
-    for (int i = 0; i <= count; i++)
-    {
-        conditions[i] = NULL;
-    }
-
-    // Parse each condition
-    int index = 0;
-    child = NULL;
-    cJSON_ArrayForEach(child, json_condition)
-    {
-        const char* matcher_str = child->string;
-        const char* value = cJSON_GetStringValue(child);
-        if (!matcher_str || !value)
-            continue;
-
-        // Find the matcher type
-        match_rule_t matcher = num_matchers; // Invalid by default
-        for (int i = 0; i < num_matchers; i++)
-        {
-            if (strcmp(matcher_str, DETECT_MATCH_STR[i]) == 0)
-            {
-                matcher = (match_rule_t)i;
-                break;
-            }
-        }
-
-        if (matcher == num_matchers)
-        {
-            merror("Unknown matcher type: %s.\n", matcher_str);
-            continue;
-        }
-
-        // Allocate and set up the condition
-        detect_rule_condition_t* condition = (detect_rule_condition_t*)malloc(sizeof(detect_rule_condition_t));
-        if (!condition)
-        {
-            merror("Failed to allocate memory for condition.\n");
-            continue;
-        }
-
-        condition->matcher = matcher;
-        condition->string = strdup(value);
-        conditions[index++] = condition;
-    }
-
-    return conditions;
-}
-
-/**
- * @brief Parse extensions from JSON
- *
- * @param json_ext The JSON object containing the extensions
- * @return detect_rule_extension_t** Array of extensions (null-terminated)
- */
-static detect_rule_extension_t** parse_extensions(cJSON* json_ext)
-{
-    if (!json_ext || !cJSON_IsObject(json_ext))
-    {
-        return NULL;
-    }
-
-    // count the number of extensions
-    cJSON* child = NULL;
-    detect_rule_extension_t** extensions;
-    int count = cJSON_GetArraySize(json_ext);
-
-    // Allocate memory for the extensions array (plus 1 for NULL terminator)
-    extensions = (detect_rule_extension_t**)malloc((count + 1) * sizeof(detect_rule_extension_t*));
-    if (extensions == NULL)
-    {
-        merror("Failed to allocate memory for extensions.\n");
-        return NULL;
-    }
-
-    // initialize to NULL
-    for (int i = 0; i <= count; i++)
-    {
-        extensions[i] = NULL;
-    }
-
-    // parse each extension
-    int index = 0;
-    child = NULL;
-    cJSON_ArrayForEach(child, json_ext)
-    {
-        const char* field = child->string;
-        if (!field)
-            continue;
-
-        detect_rule_extension_t* extension = (detect_rule_extension_t*)malloc(sizeof(detect_rule_extension_t));
-        if (!extension)
-        {
-            merror("Failed to allocate memory for extension.\n");
-            continue;
-        }
-
-        extension->field = strdup(field);
-
-        // Handle different value types
-        if (cJSON_IsString(child))
-        {
-            extension->value = strdup(cJSON_GetStringValue(child));
-        }
-        else if (cJSON_IsNumber(child))
-        {
-            double* value = (double*)malloc(sizeof(double));
-            *value = child->valuedouble;
-            extension->value = value;
-        }
-        else if (cJSON_IsBool(child))
-        {
-            int* value = (int*)malloc(sizeof(int));
-            *value = cJSON_IsTrue(child);
-            extension->value = value;
-        }
-        else
-        {
-            // complex type, store the JSON string
-            extension->value = cJSON_Print(child);
-        }
-
-        extensions[index++] = extension;
-    }
-
-    return extensions;
-}
-
-/**
- * @brief Parse a rule from JSON
- *
- * @param json_string The JSON string to parse
- * @return detect_rule_t* The parsed rule or NULL on failure
- */
-detect_rule_t* parse_rule(const char* json_string)
-{
-    if (!json_string)
-    {
-        merror("NULL JSON string.\n");
-        return NULL;
-    }
-
-    cJSON* json = cJSON_Parse(json_string);
-    if (!json)
-    {
-        const char* error_ptr = cJSON_GetErrorPtr();
-        if (error_ptr)
-        {
-            merror("Error parsing JSON.\n");
-        }
-        return NULL;
-    }
-
-    detect_rule_t* rule = (detect_rule_t*)malloc(sizeof(detect_rule_t));
-    if (!rule)
-    {
-        merror("Failed to allocate memory for rule.\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-
-    // Initialize with defaults
-    rule->id = -1;
-    rule->before = 3;
-    rule->after = 3;
-    rule->name = NULL;
-    rule->description = NULL;
-    rule->conditions = NULL;
-    rule->ext = NULL;
-
-    // id
-    cJSON* id = cJSON_GetObjectItemCaseSensitive(json, "id");
-    if (cJSON_IsNumber(id))
-    {
-        rule->id = id->valueint;
-    }
-
-    // rule name
-    cJSON* name = cJSON_GetObjectItemCaseSensitive(json, "name");
-    if (cJSON_IsString(name) && name->valuestring)
-    {
-        rule->name = strdup(name->valuestring);
-    }
-
-    // description
-    cJSON* description = cJSON_GetObjectItemCaseSensitive(json, "description");
-    if (cJSON_IsString(description) && description->valuestring)
-    {
-        rule->description = strdup(description->valuestring);
-    }
-
-    // before
-    cJSON* before = cJSON_GetObjectItemCaseSensitive(json, "before");
-    if (cJSON_IsNumber(before))
-    {
-        rule->before = before->valueint;
-    }
-
-    // after
-    cJSON* after = cJSON_GetObjectItemCaseSensitive(json, "after");
-    if (cJSON_IsNumber(after))
-    {
-        rule->after = after->valueint;
-    }
-
-    // conditions
-    cJSON* conditions = cJSON_GetObjectItemCaseSensitive(json, "conditions");
-    if (conditions)
-    {
-        rule->conditions = parse_conditions(conditions);
-    }
-
-    // extensions
-    cJSON* ext = cJSON_GetObjectItemCaseSensitive(json, "ext");
-    if (ext)
-    {
-        rule->ext = parse_extensions(ext);
-    }
-
-    cJSON_Delete(json);
-    return rule;
-}
-
-/**
- * @brief Read a file into a string
- *
- * @param filename The name of the file to read
- * @return char* The file contents or NULL on failure
- */
-static char* read_file(const char* filename)
-{
-    FILE* file = fopen(filename, "r");
-    if (!file)
-    {
-        merror("Failed to open file: %s.\n", filename);
-        return NULL;
-    }
-
-    // Get file size
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    // Allocate buffer
-    char* buffer = (char*)malloc(size + 1);
-    if (!buffer)
-    {
-        merror("Failed to allocate memory for file contents.\n");
-        fclose(file);
-        return NULL;
-    }
-
-    // Read file contents
-    size_t read_size = fread(buffer, 1, size, file);
-    buffer[read_size] = '\0';
-    fclose(file);
-
-    return buffer;
-}
-
-static void list_files(const char* path)
-{
-    DIR* dir;
-    struct dirent* entry;
-    struct stat file_stat;
-    char full_path[1024];
-
-    // Open the directory
-    if ((dir = opendir(path)) == NULL)
-    {
-        perror("Error opening directory");
-        return;
-    }
-
-    printf("Contents of directory '%s':\n", path);
-
-    // Read directory entries
-    while ((entry = readdir(dir)) != NULL)
-    {
-        // Skip "." and ".." entries
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-        {
-            continue;
-        }
-
-        // Create full path for each entry
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
-
-        // Get file stats
-        if (stat(full_path, &file_stat) == -1)
-        {
-            perror("Error getting file stats");
-            continue;
-        }
-
-        // Check if it's a file or directory
-        if (S_ISDIR(file_stat.st_mode))
-        {
-            printf("[DIR]  %s\n", entry->d_name);
-        }
-        else
-        {
-            printf("[FILE] %s (%ld bytes)\n", entry->d_name, file_stat.st_size);
-        }
-    }
-
-    // close the directory
-    closedir(dir);
-}
-
-/**
- * @brief Parse detection rules from a directory
- *
- * @param rule_dir The directory containing the rules
- * @param rules The array of rules to populate
- */
-void parse_rules(const char* rule_dir, detect_rule_t** rules)
-{
-    assert(rule_dir != NULL);
-    assert(rules != NULL);
-
-    // iterate files in rule directory
-    DIR* dir;
-    struct dirent* entry;
-    char full_path[1024];
-
-    if ((dir = opendir(rule_dir)) == NULL)
-    {
-        perror("Error opening directory");
-        return;
-    }
-
-    while ((entry = readdir(dir)) != NULL)
-    {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-        {
-            continue;
-        }
-
-        snprintf(full_path, sizeof(full_path), "%s/%s", rule_dir, entry->d_name);
-
-        // Read file contents
-        char* contents = read_file(full_path);
-        if (!contents)
-        {
-            continue;
-        }
-
-        // parse the rule
-        detect_rule_t* rule = parse_rule(contents);
-        if (rule)
-        {
-            // add the rule to the list
-            for (int i = 0; rules[i] != NULL; i++)
-            {
-                if (rules[i]->id == -1)
-                {
-                    free_rule(rules[i]);
-                    rules[i] = rule;
-                    break;
-                }
-            }
-        }
-
-        free(contents);
-    }
-
-    closedir(dir);
-}
-
 char* format_rule(detect_rule_t* rule)
 {
     if (!rule)
         return NULL;
+    // calculate the size of the buffer
+    size_t size = sizeof(RULE_INFO) + strlen(rule->name) + strlen(rule->description);
+    for (int i = 0; rule->conditions[i] != NULL; i++)
+    {
+        size += strlen(rule->conditions[i]->string) + 1;
+    }
 
-    return NULL;
+    char* buffer = malloc(size);
+    if (!buffer)
+        return NULL;
+
+    snprintf(buffer, size, RULE_INFO, rule->id, rule->name, rule->description, rule->before, rule->after);
+    return buffer;
 }

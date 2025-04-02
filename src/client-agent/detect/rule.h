@@ -5,8 +5,7 @@
 #include <cjson/cJSON.h>
 #include <time.h>
 
-static const char RULE_INFO[] = "RuleID: %d, Name: %s, Description: %s, Before: %d, After: %d";
-static const char* DETECT_MATCH_STR[] = {"startswith", "endswith", "contains", "regex"};
+static const char RULE_INFO[] = "RuleID: %d, Name: %s, Description: %s, Before: %ld, After: %ld";
 
 typedef enum match_rule
 {

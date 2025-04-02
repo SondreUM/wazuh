@@ -1,11 +1,12 @@
 #ifndef RULE_H
 #define RULE_H
 
+#include "shared.h"
 #include <cjson/cJSON.h>
 #include <time.h>
 
-const char RULE_INFO[] = "RuleID: %d, Name: %s, Description: %s, Before: %d, After: %d";
-const char* DETECT_MATCH_STR[] = {"startswith", "endswith", "contains", "regex"};
+static const char RULE_INFO[] = "RuleID: %d, Name: %s, Description: %s, Before: %d, After: %d";
+static const char* DETECT_MATCH_STR[] = {"startswith", "endswith", "contains", "regex"};
 
 typedef enum match_rule
 {
@@ -89,5 +90,15 @@ void free_rule(detect_rule_t* rule);
  * @param rule The rule to print
  */
 char* rule_info(detect_rule_t* rule);
+
+// provided by matcher.c
+/**
+ * @brief Apply a rule to a message
+ *
+ * @param rule The rule to apply
+ * @param message The message to apply the rule to
+ * @return int 1 if the rule matches, 0 if it doesn't, -1 on error
+ */
+int apply_rule(detect_rule_t* rule, const char* message);
 
 #endif /* RULE_H */

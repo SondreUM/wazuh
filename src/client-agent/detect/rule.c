@@ -8,6 +8,10 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#ifndef merror
+#define merror(...) fprintf(stderr, __VA_ARGS__)
+#endif /* merror */
+
 /* Example rule:
 {
     "id": "1",
@@ -86,7 +90,7 @@ detect_rule_condition_t** parse_conditions(cJSON* json_condition)
     conditions = (detect_rule_condition_t**)malloc((count + 1) * sizeof(detect_rule_condition_t*));
     if (conditions == NULL)
     {
-        PRINT_ERR("Failed to allocate memory\n", NULL);
+        merror("Failed to allocate memory\n");
         return NULL;
     }
 
@@ -119,7 +123,7 @@ detect_rule_condition_t** parse_conditions(cJSON* json_condition)
 
         if (matcher == num_matchers)
         {
-            PRINT_ERR("Unknown matcher type: %s at %s:%d\n", matcher_str);
+            merror("Unknown matcher type: %s.\n", matcher_str);
             continue;
         }
 
@@ -127,7 +131,7 @@ detect_rule_condition_t** parse_conditions(cJSON* json_condition)
         detect_rule_condition_t* condition = (detect_rule_condition_t*)malloc(sizeof(detect_rule_condition_t));
         if (!condition)
         {
-            PRINT_ERR("Failed to allocate memory for condition at %s:%d\n");
+            merror("Failed to allocate memory for condition.\n");
             continue;
         }
 
@@ -152,7 +156,7 @@ static detect_rule_extension_t** parse_extensions(cJSON* json_ext)
         return NULL;
     }
 
-    // Count the number of extensions
+    // count the number of extensions
     cJSON* child = NULL;
     detect_rule_extension_t** extensions;
     int count = cJSON_GetArraySize(json_ext);
@@ -161,7 +165,7 @@ static detect_rule_extension_t** parse_extensions(cJSON* json_ext)
     extensions = (detect_rule_extension_t**)malloc((count + 1) * sizeof(detect_rule_extension_t*));
     if (extensions == NULL)
     {
-        PRINT_ERR("Failed to allocate memory for extensions at %s:%d\n");
+        merror("Failed to allocate memory for extensions.\n");
         return NULL;
     }
 
@@ -183,7 +187,7 @@ static detect_rule_extension_t** parse_extensions(cJSON* json_ext)
         detect_rule_extension_t* extension = (detect_rule_extension_t*)malloc(sizeof(detect_rule_extension_t));
         if (!extension)
         {
-            PRINT_ERR("Failed to allocate memory for extension at %s:%d\n");
+            merror("Failed to allocate memory for extension.\n");
             continue;
         }
 
@@ -228,7 +232,7 @@ detect_rule_t* parse_rule(const char* json_string)
 {
     if (!json_string)
     {
-        PRINT_ERR("NULL JSON string at %s:%d\n");
+        merror("NULL JSON string.\n");
         return NULL;
     }
 
@@ -238,7 +242,7 @@ detect_rule_t* parse_rule(const char* json_string)
         const char* error_ptr = cJSON_GetErrorPtr();
         if (error_ptr)
         {
-            PRINT_ERR("Error parsing JSON before: %s at %s:%d\n", error_ptr);
+            merror("Error parsing JSON.\n");
         }
         return NULL;
     }
@@ -246,7 +250,7 @@ detect_rule_t* parse_rule(const char* json_string)
     detect_rule_t* rule = (detect_rule_t*)malloc(sizeof(detect_rule_t));
     if (!rule)
     {
-        PRINT_ERR("Failed to allocate memory for rule at %s:%d\n");
+        merror("Failed to allocate memory for rule.\n");
         cJSON_Delete(json);
         return NULL;
     }
@@ -324,7 +328,7 @@ static char* read_file(const char* filename)
     FILE* file = fopen(filename, "r");
     if (!file)
     {
-        PRINT_ERR("Failed to open file: %s at %s:%d\n", filename);
+        merror("Failed to open file: %s.\n", filename);
         return NULL;
     }
 
@@ -337,7 +341,7 @@ static char* read_file(const char* filename)
     char* buffer = (char*)malloc(size + 1);
     if (!buffer)
     {
-        PRINT_ERR("Failed to allocate memory for file contents at %s:%d\n");
+        merror("Failed to allocate memory for file contents.\n");
         fclose(file);
         return NULL;
     }
@@ -396,7 +400,7 @@ static void list_files(const char* path)
         }
     }
 
-    // Close the directory
+    // close the directory
     closedir(dir);
 }
 

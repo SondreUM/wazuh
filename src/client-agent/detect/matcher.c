@@ -1,17 +1,16 @@
-#include <assert.h>
 #include <regex.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "detect.h"
 #include "rule.h"
+#include "shared.h"
 
-static inline int condition_matcher(char* condition)
+static inline int condition_matcher(const char* condition)
 {
     for (int i = 0; i < num_matchers; i++)
     {
-        if (strcmp(match_rule_str[i], condition) == 0)
+        if (strcmp(DETECT_MATCH_STR[i], condition) == 0)
         {
             return i;
         }
@@ -21,13 +20,20 @@ static inline int condition_matcher(char* condition)
 
 static int matcher(char* message, detect_rule_condition_t* rule_condition)
 {
-    int match = condition_matcher(rule_condition->matcher);
-    if (match == -1)
+
+    if (rule_condition == NULL || rule_condition->string == NULL)
     {
-        m2error("Invalid matcher");
+        merror("NULL condition");
         return -1;
     }
-    switch (match)
+    else if (rule_condition->matcher >= num_matchers || rule_condition->matcher < 0)
+    {
+        merror("Invalid matcher");
+        return -1;
+    }
+
+    regex_t regex;
+    switch (rule_condition->matcher)
     {
         case STARTSWITH:
             if (strncmp(message, rule_condition->string, strlen(rule_condition->string)) == 0)
@@ -48,10 +54,10 @@ static int matcher(char* message, detect_rule_condition_t* rule_condition)
             }
             break;
         case REGEX:
-            regex_t regex;
+        {
             if (regcomp(&regex, rule_condition->string, 0) != 0)
             {
-                m2error("Invalid regex");
+                merror("Invalid regex");
                 return -1;
             }
             if (regexec(&regex, message, 0, NULL, 0) == 0)
@@ -59,18 +65,14 @@ static int matcher(char* message, detect_rule_condition_t* rule_condition)
                 return 1;
             }
             break;
-        default: m2error("Invalid matcher"); return -1;
+        }
+        default: merror("Invalid matcher"); return -1;
     }
     return 0;
 }
 
-/**
- * @brief Apply a rule to a message
- *
- */
-int apply_rule(detect_rule_t* rule, char* message)
+int apply_rule(detect_rule_t* rule, const char* message)
 {
-    assert(rule != NULL);
 
     detect_rule_condition_t* condition_iter = rule->conditions[0];
     for (int i = 0; condition_iter != NULL; i++)
@@ -81,4 +83,5 @@ int apply_rule(detect_rule_t* rule, char* message)
         }
         condition_iter = rule->conditions[i];
     }
+    return -1;
 }

@@ -1,6 +1,7 @@
 #include "detect.h"
+#include "rule.h"
+#include "shared.h"
 #include <assert.h>
-#include <cstddef>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,23 +19,44 @@
 agent_detect_state_t detect_state = {.state = STATUS_NORMAL, .hre = NULL, .last_detection = 0};
 // rotating log event buffer
 log_buffer_t log_buffer[MAX_LOG_DURATION];
-// HRE array
-hre_t* hre_array[MAX_HRE];
+int log_buffer_idx = 0;
+// rules
+detect_rule_t** rules;
 
 // mutex for the detection state
 static pthread_mutex_t state_mutex;
 // mutex for the log buffer
 static pthread_mutex_t log_mutex;
-// mutex for the HRE array
-static pthread_mutex_t hre_mutex;
 
 void detect_init()
 {
     pthread_mutex_init(&state_mutex, NULL);
     pthread_mutex_init(&log_mutex, NULL);
-    pthread_mutex_init(&hre_mutex, NULL);
+
+    for (int i = 0; i < MAX_LOG_DURATION; i++)
+    {
+        log_buffer[i].timestamp = 0;
+        log_buffer[i].size = 0;
+        log_buffer[i].cursor = 0;
+        log_buffer[i].buffer = NULL;
+    }
+
+    for (int i = 0; i < MAX_HRE; i++)
+    {
+        detect_state.hre[i] = NULL;
+    }
+    detect_state.state = STATUS_NORMAL;
+    detect_state.last_detection = 0;
+
+    // rules = parse_rule();
 }
 
+/**
+ * @brief Finds the index of the log buffer with the given timestamp.
+ *
+ * @param timestamp Timestamp to search for.
+ * @return int Index of the log buffer with the given timestamp, or -1 if not found.
+ */
 static inline int log_find_timestamp(time_t timestamp)
 {
     for (int i = 0; i < MAX_LOG_DURATION; i++)
@@ -47,19 +69,62 @@ static inline int log_find_timestamp(time_t timestamp)
     return -1;
 }
 
-void delete_hre(hre_t* hre)
+/**
+ * @brief Counts the number of HREs in the array.
+ *
+ * @return int Number of HREs in the array.
+ */
+static inline int num_hre()
 {
+    int count = 0;
     for (int i = 0; i < MAX_HRE; i++)
     {
-        if (&hre_array[i] == hre)
+        if (detect_state.hre[i] != NULL)
         {
-            hre_array[i] = NULL;
-            break;
+            count++;
         }
     }
+    return count;
+}
+
+/**
+ * @brief Finds the index of the oldest HRE in the array.
+ *
+ * @return int Index of the oldest HRE, or -1 if not found.
+ */
+static int oldest_hre()
+{
+    int oldest = -1;
+    time_t oldest_time = 0;
+    for (int i = 0; i < MAX_HRE; i++)
+    {
+        if (detect_state.hre[i] == NULL)
+        {
+            continue;
+        }
+        if (oldest == -1 || detect_state.hre[i]->timestamp < oldest_time)
+        {
+            oldest = i;
+            oldest_time = detect_state.hre[i]->timestamp;
+        }
+    }
+    return oldest;
+}
+
+void delete_hre(hre_t* hre)
+{
     if (hre == NULL)
     {
         return;
+    }
+    // remove the HRE from the array if exists
+    for (int i = 0; i < MAX_HRE; i++)
+    {
+        if (detect_state.hre[i] == hre)
+        {
+            detect_state.hre[i] = NULL;
+            break;
+        }
     }
 
     free(hre->event_trigger);
@@ -135,7 +200,7 @@ void dispatch_hre(hre_t* hre)
         {
             mdebug1(
                 "Out of order log buffer, expected timestamp %ld, got %ld.\n", hre->timestamp + i, log_iter->timestamp);
-            log_iter = log_iter->next;
+            log_iter = &log_buffer[(i + idx) % MAX_LOG_DURATION];
             continue;
         }
         size_t to_copy = log_iter->size;
@@ -149,7 +214,7 @@ void dispatch_hre(hre_t* hre)
         memcpy(context_cursor, log_iter->buffer, to_copy);
         context_cursor += to_copy;
         context_length -= to_copy;
-        log_iter = log_iter->next;
+        log_iter = &log_buffer[(i + idx) % MAX_LOG_DURATION];
     }
     pthread_mutex_unlock(&log_mutex);
 
@@ -159,39 +224,96 @@ void dispatch_hre(hre_t* hre)
         snprintf(NULL, 0, HRE_MESSAGE, hre->rule->name, hre->timestamp, hre->event_trigger, hre->context);
 }
 
+detect_state_t detect_get_state()
+{
+    detect_state_t state;
+    pthread_mutex_lock(&state_mutex);
+    state = detect_state.state;
+    pthread_mutex_unlock(&state_mutex);
+    return state;
+}
+
 /**
  * @brief checks HREs and dispatches completed events.
  * requires the state_mutex to be aquired before calling.
  */
 static void hre_update()
 {
-    hre_t* current = detect_state.hre;
-    hre_t* prev = NULL;
     for (int i = 0; i < MAX_HRE; i++)
     {
-        if (current == NULL)
+        if (detect_state.hre[i] == NULL)
         {
-            break;
+            continue;
         }
-
-        // check if the event window has ended
-        if (current->rule->after + current->timestamp < time(NULL))
+        // check if the HRE is within the event window
+        if (detect_state.hre[i]->timestamp + detect_state.hre[i]->rule->after < time(NULL))
         {
-            // finalize the event and send it to the server
-            dispatch_hre(current);
-            // remove the HRE from the list
-            if (prev == NULL)
-            {
-                detect_state.hre = current->next;
-            }
-            else
-            {
-                prev->next = current->next;
-            }
+            // dispatch the HRE
+            dispatch_hre(detect_state.hre[i]);
+            // delete the HRE
+            delete_hre(detect_state.hre[i]);
+            detect_state.hre[i] = NULL;
         }
-        prev = current;
-        current = current->next;
     }
+}
+
+detect_rule_t* scan_log(const char* entry)
+{
+    if (entry == NULL || rules == NULL)
+    {
+        return NULL;
+    }
+    // iterate over the rules and check if any of them match the entry
+    for (int i = 0; rules[i] != NULL; i++)
+    {
+        if (apply_rule(rules[i], entry) == 1)
+        {
+            // rule matched, return the rule
+            return rules[i];
+        }
+    }
+    // no rule matched, return NULL
+    return NULL;
+}
+
+void append_log_buffer(const char* entry, size_t size)
+{
+    if (entry == NULL || size == 0)
+    {
+        return;
+    }
+    time_t now = time(NULL);
+    pthread_mutex_lock(&log_mutex);
+    log_buffer_t* current = &log_buffer[log_buffer_idx];
+    // check if the timestamp matches
+    if (current->timestamp == now)
+    {
+        // check if the buffer will overflow, reallocate if needed
+        if (current->cursor + size > current->size)
+        {
+            current->buffer = realloc(current->buffer, current->size + size);
+        }
+    }
+    else
+    {
+        // timestamp not found, create a new log buffer
+        current->timestamp = now;
+        current->size = INITIAL_LOG_BUFFER_SIZE;
+        current->cursor = 0;
+        current->buffer = malloc(size);
+    }
+
+    // check that buffer really exists
+    if (current->buffer == NULL)
+    {
+        merror("Failed to allocate memory for the log buffer.");
+        return;
+    }
+    // append the entry to the buffer
+    memcpy(current->buffer + current->cursor, entry, size);
+    current->size += size;
+
+    pthread_mutex_unlock(&log_mutex);
 }
 
 detect_state_t detect_update(hre_t* new_hre)
@@ -201,30 +323,37 @@ detect_state_t detect_update(hre_t* new_hre)
     // if a new HRE is provided, add it to the list
     if (new_hre != NULL)
     {
-        hre_t* first = detect_state.hre;
-        detect_state.hre = new_hre;
-        if (first != NULL)
+        for (int i = 0; i < MAX_HRE; i++)
         {
-            new_hre->next = first;
+            if (detect_state.hre[i] == NULL)
+            {
+                detect_state.hre[i] = new_hre;
+                break;
+            }
         }
+        // if the HRE array is full, delete the oldest HRE
     }
 
     // check the current HREs
     hre_update();
 
     // update the agent state
-    if (detect_state.hre == NULL)
+    if (num_hre() == 0)
         detect_state.state = STATUS_NORMAL;
 
     pthread_mutex_unlock(&state_mutex);
     return detect_state.state;
 }
 
-detect_state_t detect_get_state()
+void* w_detectmon_thread(__attribute__((unused)) void* arg)
 {
-    detect_state_t state;
-    pthread_mutex_lock(&state_mutex);
-    state = detect_state.state;
-    pthread_mutex_unlock(&state_mutex);
-    return state;
+    time_t now;
+    while (1)
+    {
+        now = time(NULL);
+
+        detect_update(NULL);
+
+        sleep(3);
+    }
 }

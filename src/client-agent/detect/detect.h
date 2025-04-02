@@ -1,20 +1,18 @@
 #ifndef DETECT_H
 #define DETECT_H
 
-#include "agentd.h"
-#include "read-agents.h"
 #include "rule.h"
 #include "shared.h"
 #include <time.h>
 
+#define DYNAMIC_DETECT
+
 // Maximum number of HREs to process concurrently
 #define MAX_HRE 10
 // Maximum duration of the log buffer in seconds
-#define MAX_LOG_DURATION 60
+#define MAX_LOG_DURATION        60
+#define INITIAL_LOG_BUFFER_SIZE 1024
 
-#ifndef merror
-#define merror(msg) fprintf(stderr, "Error: %s\n", msg)
-#endif /* merror */
 #ifndef mwarning
 #define mwarning(msg) fprintf(stderr, "Warning: %s\n", msg)
 #endif /* mwarning */
@@ -25,7 +23,7 @@
 #define merror(...) fprintf(stderr, __VA_ARGS__)
 #endif /* merror */
 
-const char HRE_MESSAGE[] = "High Risk Event detected: %s, timestamp %d, trigger %s, context: %s";
+static const char HRE_MESSAGE[] = "High Risk Event detected: %s, timestamp %ld, trigger %s, context: %s";
 
 /**
  * @brief Current detection state of the agent.
@@ -54,7 +52,7 @@ typedef struct agent_detect_state
 {
     detect_state_t state;  // Current detection state
     time_t last_detection; // Timestamp of the last detection
-    hre_t* hre;            // High Risk Events, NULL if none
+    hre_t* hre[MAX_HRE];   // High Risk Events, NULL if none
 } agent_detect_state_t;
 
 typedef struct log_buffer
@@ -81,6 +79,13 @@ void detect_init();
 void dispatch_hre(hre_t* hre);
 
 /**
+ * @brief get the current detection state of the agent.
+ *
+ * @return detect_state_t integer of type detect_state_t representing the current state of the agent.
+ */
+detect_state_t detect_get_state();
+
+/**
  * @brief updates the internal detection state of the agent
  *
  * @param new new HRE to add to the list, NULL if no new HRE
@@ -89,10 +94,24 @@ void dispatch_hre(hre_t* hre);
 detect_state_t detect_update(hre_t* new_hre);
 
 /**
- * @brief get the current detection state of the agent.
+ * @brief applies the detection rules to the log entry.
  *
- * @return detect_state_t integer of type detect_state_t representing the current state of the agent.
+ * @param entry log entry to scan
+ * @return detect_rule_t* the rule that matched the entry, NULL if no rule matched
  */
-detect_state_t detect_get_state();
+detect_rule_t* scan_log(const char* entry);
+
+/**
+ * @brief Thread to update the detection state.
+ * This thread will run in a loop and update the detection state every second.
+ *
+ * @param arg Unused argument.
+ * @return void* NULL
+ */
+#ifdef WIN32
+DWORD WINAPI w_detectmon_thread(__attribute__((unused)) LPVOID arg);
+#else
+void* w_detectmon_thread(__attribute__((unused)) void* arg);
+#endif
 
 #endif /* DETECT_H */

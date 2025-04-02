@@ -6,6 +6,8 @@
 #include "rule.h"
 #include "shared.h"
 
+static const char* DETECT_MATCH_STR[] = {"startswith", "endswith", "contains", "regex"};
+
 static inline int condition_matcher(const char* condition)
 {
     for (int i = 0; i < num_matchers; i++)
@@ -18,7 +20,7 @@ static inline int condition_matcher(const char* condition)
     return -1;
 }
 
-static int matcher(char* message, detect_rule_condition_t* rule_condition)
+static int matcher(const char* message, detect_rule_condition_t* rule_condition)
 {
 
     if (rule_condition == NULL || rule_condition->string == NULL)

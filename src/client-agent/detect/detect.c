@@ -137,18 +137,17 @@ void dispatch_hre(hre_t* hre)
 
     // copy the context from buffer
     pthread_mutex_lock(&log_mutex);
-    char* cursor = NULL;
     time_t window_start = hre->timestamp - hre->rule->before;
     time_t window_end = hre->timestamp + hre->rule->after;
     // event window duration in seconds
-    time_t window_size = hre->rule->before + hre->rule->after;
+    // time_t window_size = hre->rule->before + hre->rule->after;
 
     // find the starting timestamp of the event window
-    log_buffer_t* current = NULL;
+    log_buffer_t* log_start = NULL;
     int idx = log_find_timestamp(window_start);
     if (0 <= idx && idx < MAX_LOG_DURATION)
     {
-        current = &log_buffer[idx];
+        log_start = &log_buffer[idx];
     }
     else
     {
@@ -157,11 +156,11 @@ void dispatch_hre(hre_t* hre)
         return;
     }
 
-    assert(current != NULL);
+    assert(log_start != NULL);
 
     // calculate the size of the context
     // context length in bytes
-    log_buffer_t* log_iter;
+    log_buffer_t* log_iter = log_start;
     size_t context_length = 0;
 
     for (int i = idx; log_iter->timestamp <= window_end; i++)
@@ -219,9 +218,8 @@ void dispatch_hre(hre_t* hre)
     pthread_mutex_unlock(&log_mutex);
 
     // format the event and send it to the server
-    char* event = NULL;
     size_t message_length =
-        snprintf(NULL, 0, HRE_MESSAGE, hre->rule->name, hre->timestamp, hre->event_trigger, hre->context);
+        snprintf(hre->context, 0, HRE_MESSAGE, hre->rule->name, hre->timestamp, hre->event_trigger, hre->context);
 }
 
 detect_state_t detect_get_state()

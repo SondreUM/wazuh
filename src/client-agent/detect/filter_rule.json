@@ -1,0 +1,11 @@
+{
+    "id": 1001,
+    "name": "level: debug",
+    "description": "Remove debug level logs",
+    "conditions": {
+        "startswith": "DEBUG"
+    },
+    "ext": {
+        "tag": "level"
+    }
+}

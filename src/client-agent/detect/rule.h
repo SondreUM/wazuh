@@ -5,6 +5,17 @@
 #include <cjson/cJSON.h>
 #include <time.h>
 
+#define RULE_DEFAULT_BEFORE 1
+#define RULE_DEFAULT_AFTER  3
+// Maximum number of conditions and extensions
+// Additional values will be ignored
+#define RULE_MAX_CONDITIONS 10
+#define RULE_MAX_EXTENSIONS 10
+// Maximum rule->name before truncation
+#define RULE_MAX_NAME 64
+// Maximum rule->description before truncation
+#define RULE_MAX_DESC 256
+
 static const char RULE_INFO[] = "RuleID: %d, Name: %s, Description: %s, Before: %ld, After: %ld";
 
 typedef enum match_rule
@@ -23,8 +34,8 @@ typedef enum match_rule
  */
 typedef struct detect_rule_extension
 {
-    char* field;
-    void* value;
+    char* field; ///< Name of the field
+    char* value; ///< Value of the field
 } detect_rule_extension_t;
 
 /**
@@ -33,8 +44,8 @@ typedef struct detect_rule_extension
  */
 typedef struct detect_rule_condition
 {
-    match_rule_t matcher;
-    char* string;
+    match_rule_t matcher; ///< Matcher type
+    char* string;         ///< String to match
 } detect_rule_condition_t;
 
 /**
@@ -42,23 +53,15 @@ typedef struct detect_rule_condition
  */
 typedef struct detect_rule
 {
-    int id;                               // unique id
-    time_t before;                        // activation windows ahead of the event
-    time_t after;                         // activation windows after the event
-    char* name;                           // rule name
-    char* description;                    // rule description
-    detect_rule_condition_t** conditions; // rule conditions
-    detect_rule_extension_t** ext;        // rule extensions
+    int id;                               ///< unique id
+    time_t before;                        ///< activation windows ahead of the event
+    time_t after;                         ///< activation windows after the event
+    char* name;                           ///< rule name
+    char* description;                    ///< rule description
+    detect_rule_condition_t** conditions; ///< rule conditions
+    detect_rule_extension_t** ext;        ///< rule extensions
 
 } detect_rule_t;
-
-/**
- * @brief Parse a condition from JSON
- *
- * @param json_condition The JSON object containing the condition
- * @return detect_rule_condition_t** Array of conditions (null-terminated)
- */
-detect_rule_condition_t** parse_conditions(cJSON* json_condition);
 
 /**
  * @brief Parse a rule from JSON
@@ -73,8 +76,9 @@ detect_rule_t* parse_rule(const char* json_string);
  *
  * @param rule_dir The directory containing the rules
  * @param rules The array of rules to populate
+ * @return int The number of rules parsed or -1 on error
  */
-void parse_rules(const char* rule_dir, detect_rule_t** rules);
+int parse_rules(const char* rule_dir, detect_rule_t** rules);
 
 /**
  * @brief Free a rule and all its resources

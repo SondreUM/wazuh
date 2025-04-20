@@ -12,16 +12,8 @@
 // Maximum duration of the log buffer in seconds
 #define MAX_LOG_DURATION        60
 #define INITIAL_LOG_BUFFER_SIZE 1024
-
-#ifndef mwarning
-#define mwarning(msg) fprintf(stderr, "Warning: %s\n", msg)
-#endif /* mwarning */
-#ifndef mdebug1
-#define mdebug1(...) fprintf(stdout, __VA_ARGS__)
-#endif /* mdebug1 */
-#ifndef merror
-#define merror(...) fprintf(stderr, __VA_ARGS__)
-#endif /* merror */
+#define FILTER_RULE_DIRECTORY   "/var/ossec/etc/detect/"
+#define DETECT_RULE_MAX         100
 
 static const char HRE_MESSAGE[] = "High Risk Event detected: %s, timestamp %ld, trigger %s, context: %s";
 
@@ -64,9 +56,12 @@ typedef struct log_buffer
 } log_buffer_t;
 
 /**
- * @brief Initialize the detection module.
+ * @brief initializes the detection module.
+ *
+ * @param rule_dir directory containing the detection rules
+ * @note if rule_dir is NULL, the default directory will be used.
  */
-void detect_init();
+void detect_init(const char* rule_dir);
 
 /**
  * @brief finalize the HRE event and send it to the server.
@@ -100,6 +95,16 @@ detect_state_t detect_update(hre_t* new_hre);
  * @return detect_rule_t* the rule that matched the entry, NULL if no rule matched
  */
 detect_rule_t* scan_log(const char* entry);
+
+/**
+ * @brief Pushes a log entry to the detection buffer.
+ * This function will append the entry to the buffer and update the size.
+ *
+ * @param entry The log entry to push.
+ * @param size The size of the log entry.
+ * @return int 0 on success, -1 on failure.
+ */
+int detect_buffer_push(const char* entry, size_t size);
 
 /**
  * @brief Thread to update the detection state.

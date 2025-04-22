@@ -2,6 +2,7 @@
 #include "agentd.h"
 #include "rule.h"
 #include "shared.h"
+#include <cjson/cJSON.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,11 +24,13 @@ void testable_detectmon_thread()
 }
 #endif
 
-typedef struct log_entry
+/* datastructure for storing log events in the buffer */
+struct log_entry
 {
-    size_t size;
-    char* buffer;
-} log_entry_t;
+    size_t size;    // size of the log entry
+    char log_entry; // log entry start
+} __attribute__((packed));
+typedef struct log_entry log_entry_t;
 
 /* agent detection state */
 agent_detect_state_t detect_state = {.state = STATUS_NORMAL, .hre = NULL, .last_detection = 0};
@@ -255,7 +258,8 @@ void dispatch_hre(hre_t* hre)
     pthread_mutex_unlock(&log_mutex);
 
     // format the event and send it to the server
-    snprintf(hre->context, 0, HRE_MESSAGE, hre->rule->name, hre->timestamp, hre->event_trigger, hre->context);
+    snprintf(
+        hre->context, context_length, HRE_MESSAGE, hre->rule->name, hre->timestamp, hre->event_trigger, hre->context);
     buffer_append(hre->context);
 }
 
@@ -292,17 +296,17 @@ static void hre_update()
     }
 }
 
-detect_rule_t* scan_log(const char* entry)
+detect_rule_t* scan_log(const char* entry, size_t len)
 {
-    if (entry == NULL)
+    if (entry == NULL || len <= 0)
     {
-        merror("Invalid log entry");
+        merror("Invalid arguments to scan_log");
         return NULL;
     }
     // iterate over the rules and check if any of them match the entry
     for (int i = 0; rules[i] != NULL; i++)
     {
-        if (apply_rule(rules[i], entry) == 1)
+        if (apply_rule(rules[i], entry, len) == 1)
         {
             // rule matched, return the rule
             return rules[i];
@@ -322,13 +326,18 @@ int detect_buffer_push(const char* entry, size_t size)
     pthread_mutex_lock(&log_mutex);
     time_t now = time(NULL);
     log_buffer_t* current = &log_buffer[log_buffer_idx];
+
+    // check for correct ending
+    if (entry[size - 1] != '\n')
+        size++;
+
     // check if the current idx timestamp matches
     if (current->timestamp == now)
     {
         // check if the buffer will overflow, reallocate if needed
         if (current->cursor + size > current->size)
         {
-            current->buffer = realloc(current->buffer, current->size + size);
+            current->buffer = realloc(current->buffer, current->size + size + sizeof(size_t));
         }
     }
     // timestamp do not exist, create a new log buffer
@@ -370,9 +379,15 @@ int detect_buffer_push(const char* entry, size_t size)
         pthread_mutex_unlock(&log_mutex);
         return -1;
     }
+    // insert the size of the entry at the beginning
+    // uses the log_entry_t struct to store the size of the entry
+    memcpy(current->buffer + current->cursor, &size, sizeof(size_t));
     // append the entry to the buffer
-    memcpy(current->buffer + current->cursor, entry, size);
+    memcpy(current->buffer + current->cursor + sizeof(size_t), entry, size);
+    // update the cursor
     current->size += size;
+    // set line ending
+    current->buffer[current->cursor + size] = '\0';
 
     pthread_mutex_unlock(&log_mutex);
     return 0;
@@ -409,13 +424,6 @@ detect_state_t detect_update(hre_t* new_hre)
         }
     }
 
-    // check the current HREs
-    hre_update();
-
-    // update the agent state
-    if (num_hre() == 0)
-        detect_state.state = STATUS_NORMAL;
-
     pthread_mutex_unlock(&state_mutex);
     return detect_state.state;
 }
@@ -446,13 +454,11 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
     // read each log entry in the buffer
     for (; read_cursor <= log_buffer->cursor;)
     {
-        // search for line breaks
-        char* event_end = memchr(log_buffer->buffer + read_cursor, '\r', log_buffer->cursor - read_cursor);
-        if (event_end == NULL)
-            break;
+        // find the end of the log entry
+        log_entry_t* entry = (log_entry_t*)(log_buffer->buffer + read_cursor);
+
         // apply rules to the log entry
-        size_t entry_size = event_end - (log_buffer->buffer + read_cursor);
-        detect_rule_t* rule = scan_log(log_buffer->buffer + read_cursor);
+        detect_rule_t* rule = scan_log(&entry->log_entry, entry->size);
         if (rule != NULL)
         {
             // create a new HRE
@@ -464,7 +470,7 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
             }
             new_hre->rule = rule;
             new_hre->timestamp = log_buffer->timestamp;
-            new_hre->event_trigger = strndup(log_buffer->buffer + read_cursor, entry_size);
+            new_hre->event_trigger = strndup(log_buffer->buffer + read_cursor, entry->size);
             if (new_hre->event_trigger == NULL)
             {
                 merror("Failed to allocate memory for the event trigger.");
@@ -475,7 +481,7 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
             detections++;
         }
         // move the read cursor to the next log entry
-        read_cursor += entry_size + 1;
+        read_cursor += entry->size + sizeof(log_entry_t);
         // check if the read cursor is out of bounds
         if (read_cursor >= log_buffer->cursor)
         {
@@ -491,11 +497,17 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
     while (1)
     {
         mdebug1("Detect thread running, time: %ld", time(NULL));
+        // scan the log buffer for new events
         for (; log_detect_idx < log_buffer_idx; log_detect_idx++)
         {
             int detections = scan_log_buffer(&log_buffer[log_detect_idx]);
             mdebug1("Detected %d events in log buffer %d", detections, log_detect_idx);
         }
+
+        // update the agent state
+        hre_update();
+        if (num_hre() == 0)
+            detect_state.state = STATUS_NORMAL;
         sleep(1);
     }
 }

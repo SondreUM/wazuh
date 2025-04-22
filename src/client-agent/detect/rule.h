@@ -4,6 +4,7 @@
 #include "shared.h"
 #include <cjson/cJSON.h>
 #include <stdint.h>
+#include <sys/types.h>
 #include <time.h>
 
 // Default values for before and after event windows
@@ -105,6 +106,6 @@ char* rule_info(detect_rule_t* rule);
  * @param message The message to apply the rule to
  * @return int 1 if the rule matches, 0 if it doesn't, -1 on error
  */
-int apply_rule(detect_rule_t* rule, const char* message);
+int apply_rule(detect_rule_t* rule, const char* message, size_t len);
 
 #endif /* RULE_H */

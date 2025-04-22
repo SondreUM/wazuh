@@ -94,7 +94,7 @@ detect_state_t detect_update(hre_t* new_hre);
  * @param entry log entry to scan
  * @return detect_rule_t* the rule that matched the entry, NULL if no rule matched
  */
-detect_rule_t* scan_log(const char* entry);
+detect_rule_t* scan_log(const char* entry, size_t len);
 
 /**
  * @brief Pushes a log entry to the detection buffer.

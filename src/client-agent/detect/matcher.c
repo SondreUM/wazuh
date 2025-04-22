@@ -2,11 +2,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #include "rule.h"
 #include "shared.h"
 
-static int matcher(const char* message, detect_rule_condition_t* rule_condition)
+static int matcher(detect_rule_condition_t* rule_condition, const char* message, size_t len)
 {
 
     if (rule_condition == NULL || rule_condition->string == NULL)
@@ -24,7 +25,7 @@ static int matcher(const char* message, detect_rule_condition_t* rule_condition)
     switch (rule_condition->matcher)
     {
         case STARTSWITH:
-            if (strncmp(message, rule_condition->string, strlen(rule_condition->string)) == 0)
+            if (strncmp(message, rule_condition->string, len) == 0)
             {
                 return 1;
             }
@@ -59,17 +60,28 @@ static int matcher(const char* message, detect_rule_condition_t* rule_condition)
     return 0;
 }
 
-int apply_rule(detect_rule_t* rule, const char* message)
+int apply_rule(detect_rule_t* rule, const char* message, size_t len)
 {
+    if (rule == NULL || message == NULL || len <= 0)
+    {
+        merror("Invalid arguments to apply_rule");
+        return -1;
+    }
+
+    if (rule->conditions == NULL)
+    {
+        mwarn("No conditions to apply");
+        return 0;
+    }
 
     detect_rule_condition_t* condition_iter = rule->conditions[0];
     for (int i = 0; condition_iter != NULL; i++)
     {
-        if (matcher(message, condition_iter) == 1)
+        if (matcher(condition_iter, message, len) == 1)
         {
             return 1;
         }
         condition_iter = rule->conditions[i];
     }
-    return -1;
+    return 0;
 }

@@ -1,4 +1,5 @@
 #include "detect.h"
+#include "agentd.h"
 #include "rule.h"
 #include "shared.h"
 #include <pthread.h>
@@ -22,15 +23,21 @@ void testable_detectmon_thread()
 }
 #endif
 
+typedef struct log_entry
+{
+    size_t size;
+    char* buffer;
+} log_entry_t;
+
 /* agent detection state */
 agent_detect_state_t detect_state = {.state = STATUS_NORMAL, .hre = NULL, .last_detection = 0};
 // rotating log event buffer
 log_buffer_t log_buffer[MAX_LOG_DURATION];
-int log_buffer_idx = 0;
-int log_detect_idx = 0;
+static int log_buffer_idx = 0;
+static int log_detect_idx = 0;
 
 // rules array
-detect_rule_t* rules[DETECT_RULE_MAX] = {NULL}; // Array of rules
+static detect_rule_t* rules[DETECT_RULE_MAX] = {NULL}; // Array of rules
 
 // mutex for the detection state
 static pthread_mutex_t state_mutex;
@@ -188,8 +195,6 @@ void dispatch_hre(hre_t* hre)
         return;
     }
 
-    assert(log_start != NULL);
-
     // calculate the size of the context
     // context length in bytes
     log_buffer_t* log_iter = log_start;
@@ -250,8 +255,8 @@ void dispatch_hre(hre_t* hre)
     pthread_mutex_unlock(&log_mutex);
 
     // format the event and send it to the server
-    size_t message_length =
-        snprintf(hre->context, 0, HRE_MESSAGE, hre->rule->name, hre->timestamp, hre->event_trigger, hre->context);
+    snprintf(hre->context, 0, HRE_MESSAGE, hre->rule->name, hre->timestamp, hre->event_trigger, hre->context);
+    buffer_append(hre->context);
 }
 
 detect_state_t detect_get_state()
@@ -289,8 +294,9 @@ static void hre_update()
 
 detect_rule_t* scan_log(const char* entry)
 {
-    if (entry == NULL || rules == NULL)
+    if (entry == NULL)
     {
+        merror("Invalid log entry");
         return NULL;
     }
     // iterate over the rules and check if any of them match the entry
@@ -421,7 +427,7 @@ detect_state_t detect_update(hre_t* new_hre)
  * @param log_buffer the log buffer to scan.
  * @return int the number of detections found in the log buffer.
  */
-static int inline scan_log_buffer(log_buffer_t* log_buffer)
+inline static int scan_log_buffer(log_buffer_t* log_buffer)
 {
     if (log_buffer == NULL)
     {
@@ -481,9 +487,10 @@ static int inline scan_log_buffer(log_buffer_t* log_buffer)
 
 void* w_detectmon_thread(__attribute__((unused)) void* arg)
 {
+    mdebug1("Detect thread started");
     while (1)
     {
-        mdebug1("Detect thread running, time: %ld", now);
+        mdebug1("Detect thread running, time: %ld", time(NULL));
         for (; log_detect_idx < log_buffer_idx; log_detect_idx++)
         {
             int detections = scan_log_buffer(&log_buffer[log_detect_idx]);

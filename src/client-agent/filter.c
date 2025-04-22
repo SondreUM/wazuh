@@ -74,7 +74,7 @@ int filter_log_check(detect_rule_t** rules, const char* message, size_t length)
     for (int i = 0; rules[i] != NULL; i++)
     {
         detect_rule_t* rule = rules[i];
-        if (apply_rule(rule, message) == 0)
+        if (apply_rule(rule, message, length) == 0)
         {
             mdebug1("Filter rule matched: %s, dropping\n", rule->name);
             return rule->id; // Rule matched

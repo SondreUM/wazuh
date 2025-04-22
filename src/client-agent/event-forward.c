@@ -14,9 +14,22 @@
 #include "sec.h"
 #include "shared.h"
 
+#ifdef DYNAMIC_DETECT
+#include "detect/detect.h"
+#include "filter.h"
+#endif
+
 /* Receive a message locally on the agent and forward it to the manager */
 void* EventForward()
 {
+#ifdef DYNAMIC_DETECT
+    detect_rule_t** discard_rules = filter_init(NULL);
+    if (discard_rules == NULL)
+    {
+        merror("Failed to initialize filter rules");
+        mwarn("Proceeding without filter rules");
+    }
+#endif
 
     ssize_t recv_b;
     char msg[OS_MAXSTR + 1];
@@ -30,8 +43,16 @@ void* EventForward()
         msg[recv_b] = '\0';
         if (agt->buffer)
         {
+#ifdef DYNAMIC_DETECT
             // send message to detectmon
-            append_log_buffer(msg, recv_b);
+            detect_buffer_push(msg, recv_b);
+
+            // check if the message should be discarded
+            if (filter_log_check(discard_rules, msg, recv_b) > 0)
+            {
+                continue;
+            }
+#endif
             if (buffer_append(msg) < 0)
             {
                 break;

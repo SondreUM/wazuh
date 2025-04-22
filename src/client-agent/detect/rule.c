@@ -1,5 +1,4 @@
 #include "rule.h"
-#include "detect.h"
 #include "shared.h"
 #include <assert.h>
 #include <cjson/cJSON.h>
@@ -103,7 +102,7 @@ detect_rule_t* parse_rule(const char* json_string)
     if (cJSON_HasObjectItem(root, "conditions") == 1)
     {
         cJSON* conditions = cJSON_GetObjectItem(root, "conditions");
-        rule->conditions = calloc(cJSON_GetArraySize(conditions) + 1, sizeof(detect_rule_condition_t*));
+        *rule->conditions = calloc(cJSON_GetArraySize(conditions) + 1, sizeof(detect_rule_condition_t*));
 
         int cond_idx = 0;
         cJSON* cond_item;
@@ -129,7 +128,7 @@ detect_rule_t* parse_rule(const char* json_string)
             }
 
             cond->matcher = condition_matcher(cond_item->string, strlen(cond_item->string));
-            if (cond->matcher == -1)
+            if (cond->matcher == UNDEFINED_MATCHER)
             {
                 merror("Invalid matcher: %s\n", cond_item->string);
                 free(cond);
@@ -152,7 +151,7 @@ detect_rule_t* parse_rule(const char* json_string)
     {
 
         cJSON* ext = cJSON_GetObjectItem(root, "ext");
-        rule->ext = calloc(cJSON_GetArraySize(ext) + 1, sizeof(detect_rule_extension_t*));
+        *rule->ext = calloc(cJSON_GetArraySize(ext) + 1, sizeof(detect_rule_extension_t*));
 
         int ext_idx = 0;
         cJSON* ext_item;
@@ -186,7 +185,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules)
     DIR* dir;
     struct dirent* ent;
     size_t capacity = 32;
-    size_t count = 0;
+    int count = 0;
 
     *rules = calloc(capacity, sizeof(detect_rule_t*));
     if (!*rules)
@@ -208,14 +207,29 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules)
             // Open and read file
             FILE* fp = fopen(path, "r");
             if (!fp)
+            {
                 continue;
+            }
 
             fseek(fp, 0, SEEK_END);
             long len = ftell(fp);
+            if (len < 0)
+            {
+                merror("Failed to get file size: %s\n", path);
+                fclose(fp);
+                continue;
+            }
             fseek(fp, 0, SEEK_SET);
 
             char* json_data = malloc(len + 1);
-            fread(json_data, 1, len, fp);
+            unsigned long retval = fread(json_data, 1, len, fp);
+            if (retval != (unsigned)len)
+            {
+                merror("Failed to read file: %s\n", path);
+                free(json_data);
+                fclose(fp);
+                continue;
+            }
             json_data[len] = '\0';
             fclose(fp);
 
@@ -226,12 +240,13 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules)
             if (rule)
             {
                 // Resize array if needed
-                if (count >= capacity - 1)
+                if (count >= (int)capacity - 1)
                 {
                     capacity *= 2;
                     *rules = realloc(*rules, capacity * sizeof(detect_rule_t*));
                 }
                 rules[count++] = rule;
+                mdebug1("Parsed rule %ld: %s\n", rule->id, rule->name);
             }
         }
         closedir(dir);
@@ -240,6 +255,8 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules)
         rules[count] = NULL;
         return count;
     }
+    merror("Failed to open directory: %s\n", rule_dir);
+    return -1;
 }
 
 /**
@@ -264,7 +281,7 @@ void free_rule(detect_rule_t* rule)
             free(rule->conditions[i]->string);
             free(rule->conditions[i]);
         }
-        free(rule->conditions);
+        free(*rule->conditions);
     }
 
     // Free extensions
@@ -276,7 +293,7 @@ void free_rule(detect_rule_t* rule)
             free(rule->ext[i]->value);
             free(rule->ext[i]);
         }
-        free(rule->ext);
+        free(*rule->ext);
     }
 
     free(rule);

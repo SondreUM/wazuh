@@ -3,8 +3,10 @@
 
 #include "shared.h"
 #include <cjson/cJSON.h>
+#include <stdint.h>
 #include <time.h>
 
+// Default values for before and after event windows
 #define RULE_DEFAULT_BEFORE 1
 #define RULE_DEFAULT_AFTER  3
 // Maximum number of conditions and extensions
@@ -16,14 +18,15 @@
 // Maximum rule->description before truncation
 #define RULE_MAX_DESC 256
 
-static const char RULE_INFO[] = "RuleID: %d, Name: %s, Description: %s, Before: %ld, After: %ld";
+static const char RULE_INFO[] = "RuleID: %ld, Name: %s, Description: %s, Before: %ld, After: %ld";
 
 typedef enum match_rule
 {
-    STARTSWITH = 0, ///< Match the start of the message
-    ENDSWITH,       ///< Match the end of the message
-    CONTAINS,       ///< Match the message
-    REGEX,          ///< Match the message with a regular expression
+    UNDEFINED_MATCHER = -1, ///< Undefined matcher
+    STARTSWITH,             ///< Match the start of the message
+    ENDSWITH,               ///< Match the end of the message
+    CONTAINS,               ///< Match the message
+    REGEX,                  ///< Match the message with a regular expression
 
     num_matchers
 } match_rule_t;
@@ -53,7 +56,7 @@ typedef struct detect_rule_condition
  */
 typedef struct detect_rule
 {
-    int id;                               ///< unique id
+    int64_t id;                           ///< unique id
     time_t before;                        ///< activation windows ahead of the event
     time_t after;                         ///< activation windows after the event
     char* name;                           ///< rule name

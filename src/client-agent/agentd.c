@@ -13,6 +13,10 @@
 #include "os_net/os_net.h"
 #include "shared.h"
 
+#ifdef DYNAMIC_DETECT
+#include "detect/detect.h"
+#endif
+
 /* Start the agent daemon */
 void AgentdStart(int uid, int gid, const char* user, const char* group)
 {
@@ -174,7 +178,7 @@ void AgentdStart(int uid, int gid, const char* user, const char* group)
 
     // start dynamic detection module
 #ifdef DYNAMIC_DETECT
-    detect_init();
+    detect_init(NULL);
     w_create_thread(w_detectmon_thread, (void*)NULL);
 #endif
 

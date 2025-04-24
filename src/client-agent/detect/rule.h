@@ -19,7 +19,7 @@
 // Maximum rule->description before truncation
 #define RULE_MAX_DESC 256
 
-static const char RULE_INFO[] = "RuleID: %ld, Name: %s, Description: %s, Before: %ld, After: %ld";
+static const char RULE_INFO[] = "RuleID: %ld, Name: %s, Before: %ld, After: %ld, Description: %s";
 
 typedef enum match_rule
 {
@@ -97,6 +97,15 @@ void free_rule(detect_rule_t* rule);
  * @param rule The rule to print
  */
 char* rule_info(detect_rule_t* rule);
+
+/**
+ * @brief formats a detect_rule_t struct into a printable string
+ * @param rule pointer to detect_rule_t struct to format
+ * @return char* allocated string containing formatted output
+ *
+ * Caller is responsible for freeing the returned string with free()
+ */
+char* format_detect_rule(const detect_rule_t* rule);
 
 // provided by matcher.c
 /**

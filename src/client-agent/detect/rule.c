@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <cjson/cJSON.h>
 #include <dirent.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,7 +103,7 @@ detect_rule_t* parse_rule(const char* json_string)
     if (cJSON_HasObjectItem(root, "conditions") == 1)
     {
         cJSON* conditions = cJSON_GetObjectItem(root, "conditions");
-        *rule->conditions = calloc(cJSON_GetArraySize(conditions) + 1, sizeof(detect_rule_condition_t*));
+        rule->conditions = calloc(cJSON_GetArraySize(conditions) + 1, sizeof(detect_rule_condition_t*));
 
         int cond_idx = 0;
         cJSON* cond_item;
@@ -151,7 +152,7 @@ detect_rule_t* parse_rule(const char* json_string)
     {
 
         cJSON* ext = cJSON_GetObjectItem(root, "ext");
-        *rule->ext = calloc(cJSON_GetArraySize(ext) + 1, sizeof(detect_rule_extension_t*));
+        rule->ext = calloc(cJSON_GetArraySize(ext) + 1, sizeof(detect_rule_extension_t*));
 
         int ext_idx = 0;
         cJSON* ext_item;
@@ -187,9 +188,14 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules)
     size_t capacity = 32;
     int count = 0;
 
-    *rules = calloc(capacity, sizeof(detect_rule_t*));
-    if (!*rules)
+    rules = calloc(capacity, sizeof(detect_rule_t*));
+    if (!rules)
         return -1;
+
+    for (int i = 0; i < capacity; i++)
+    {
+        rules[i] = NULL;
+    }
 
     if ((dir = opendir(rule_dir)) != NULL)
     {
@@ -243,7 +249,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules)
                 if (count >= (int)capacity - 1)
                 {
                     capacity *= 2;
-                    *rules = realloc(*rules, capacity * sizeof(detect_rule_t*));
+                    rules = realloc(*rules, capacity * sizeof(detect_rule_t*));
                 }
                 rules[count++] = rule;
                 mdebug1("Parsed rule %ld: %s\n", rule->id, rule->name);
@@ -251,11 +257,11 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules)
         }
         closedir(dir);
 
-        // Null-terminate array
-        rules[count] = NULL;
         return count;
     }
     merror("Failed to open directory: %s\n", rule_dir);
+    free(rules);
+    rules = NULL;
     return -1;
 }
 
@@ -281,7 +287,7 @@ void free_rule(detect_rule_t* rule)
             free(rule->conditions[i]->string);
             free(rule->conditions[i]);
         }
-        free(*rule->conditions);
+        free(rule->conditions);
     }
 
     // Free extensions
@@ -293,7 +299,7 @@ void free_rule(detect_rule_t* rule)
             free(rule->ext[i]->value);
             free(rule->ext[i]);
         }
-        free(*rule->ext);
+        free(rule->ext);
     }
 
     free(rule);
@@ -325,6 +331,146 @@ char* format_rule(detect_rule_t* rule)
 
     // TODO: add conditions and extensions to the buffer
     // format the rule into the buffer
-    snprintf(buffer, size, RULE_INFO, rule->id, rule->name, rule->description, rule->before, rule->after);
+    snprintf(buffer, size, RULE_INFO, rule->id, rule->name, rule->before, rule->after, rule->description);
     return buffer;
+}
+
+inline static const char* matcher_to_string(match_rule_t matcher)
+{
+    switch (matcher)
+    {
+        case STARTSWITH: return "STARTSWITH";
+        case ENDSWITH: return "ENDSWITH";
+        case CONTAINS: return "CONTAINS";
+        case REGEX: return "REGEX";
+        case UNDEFINED_MATCHER:
+        default: return "UNDEFINED_MATCHER";
+    }
+}
+
+static char* format_extension(const detect_rule_extension_t* ext)
+{
+    if (!ext)
+        return NULL;
+
+    const char* field = ext->field ? ext->field : "(null)";
+    const char* value = ext->value ? ext->value : "(null)";
+
+    int len = snprintf(NULL, 0, "{ field: \"%s\", value: \"%s\" }", field, value);
+    char* buf = malloc(len + 1);
+    snprintf(buf, len + 1, "{ field: \"%s\", value: \"%s\" }", field, value);
+    return buf;
+}
+
+static char* format_condition(const detect_rule_condition_t* cond)
+{
+    if (!cond)
+        return NULL;
+
+    const char* matcher = matcher_to_string(cond->matcher);
+    const char* string = cond->string ? cond->string : "(null)";
+
+    int len = snprintf(NULL, 0, "{ matcher: %s, string: \"%s\" }", matcher, string);
+    char* buf = malloc(len + 1);
+    snprintf(buf, len + 1, "{ matcher: %s, string: \"%s\" }", matcher, string);
+    return buf;
+}
+
+char* format_detect_rule(const detect_rule_t* rule)
+{
+    if (!rule)
+        return NULL;
+
+    // handle NULL values safely
+    const char* name = rule->name ? rule->name : "(null)";
+    const char* desc = rule->description ? rule->description : "(null)";
+
+    // calculate array sizes
+    size_t num_conditions = 0;
+    if (rule->conditions)
+    {
+        while (rule->conditions[num_conditions]) num_conditions++;
+    }
+
+    size_t num_extensions = 0;
+    if (rule->ext)
+    {
+        while (rule->ext[num_extensions]) num_extensions++;
+    }
+
+    // calculate buffer size
+    int len = snprintf(NULL,
+                       0,
+                       "detect_rule_t {\n"
+                       "  id: %" PRId64 "\n"
+                       "  before: %ld\n"
+                       "  after: %ld\n"
+                       "  name: \"%s\"\n"
+                       "  description: \"%.100s%s\"\n",
+                       rule->id,
+                       (long)rule->before,
+                       (long)rule->after,
+                       name,
+                       desc,
+                       (strlen(desc) > 100 ? "..." : ""));
+
+    // add conditions space
+    len += snprintf(NULL, 0, "  conditions: [\n");
+    for (size_t i = 0; i < num_conditions; i++)
+    {
+        char* cond_str = format_condition(rule->conditions[i]);
+        len += snprintf(NULL, 0, "    %s%s\n", cond_str, (i < num_conditions - 1) ? "," : "");
+        free(cond_str);
+    }
+    len += snprintf(NULL, 0, "  ]\n");
+
+    // add extensions space
+    len += snprintf(NULL, 0, "  extensions: [\n");
+    for (size_t i = 0; i < num_extensions; i++)
+    {
+        char* ext_str = format_extension(rule->ext[i]);
+        len += snprintf(NULL, 0, "    %s%s\n", ext_str, (i < num_extensions - 1) ? "," : "");
+        free(ext_str);
+    }
+    len += snprintf(NULL, 0, "  ]\n}\n");
+
+    // allocate and build string
+    char* buf = malloc(len + 1);
+    char* ptr = buf;
+
+    ptr += snprintf(ptr,
+                    len + 1,
+                    "detect_rule_t {\n"
+                    "  id: %" PRId64 "\n"
+                    "  before: %ld\n"
+                    "  after: %ld\n"
+                    "  name: \"%s\"\n"
+                    "  description: \"%.100s%s\"\n",
+                    rule->id,
+                    (long)rule->before,
+                    (long)rule->after,
+                    name,
+                    desc,
+                    (strlen(desc) > 100 ? "..." : ""));
+
+    ptr += sprintf(ptr, "  conditions: [\n");
+    for (size_t i = 0; i < num_conditions; i++)
+    {
+        char* cond_str = format_condition(rule->conditions[i]);
+        ptr += sprintf(ptr, "    %s%s\n", cond_str, (i < num_conditions - 1) ? "," : "");
+        free(cond_str);
+    }
+    ptr += sprintf(ptr, "  ]\n");
+
+    ptr += sprintf(ptr, "  extensions: [\n");
+    for (size_t i = 0; i < num_extensions; i++)
+    {
+        char* ext_str = format_extension(rule->ext[i]);
+        ptr += sprintf(ptr, "    %s%s\n", ext_str, (i < num_extensions - 1) ? "," : "");
+        free(ext_str);
+    }
+    // sprintf appends a null terminator
+    sprintf(ptr, "  ]\n}\n");
+
+    return buf;
 }

@@ -50,9 +50,9 @@ typedef struct agent_detect_state
 typedef struct log_buffer
 {
     time_t timestamp; // Timestamp of the log,
-    size_t size;
-    size_t cursor;
-    char* buffer;
+    size_t size;      // Size of the buffer
+    size_t cursor;    // Current position in the buffer
+    char* buffer;     // Pointer to the buffer
 } log_buffer_t;
 
 /**
@@ -105,6 +105,15 @@ detect_rule_t* scan_log(const char* entry, size_t len);
  * @return int 0 on success, -1 on failure.
  */
 int detect_buffer_push(const char* entry, size_t size);
+
+/**
+ * @brief Formats an hre_t struct into a printable string
+ * @param hre Pointer to hre_t struct to format
+ * @return char* Allocated string containing formatted output
+ *
+ * Caller must free the returned string with free()
+ */
+char* format_hre(const hre_t* hre);
 
 /**
  * @brief Thread to update the detection state.

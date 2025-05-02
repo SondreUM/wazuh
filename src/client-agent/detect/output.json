@@ -1,0 +1,24 @@
+{
+    "timestamp": 1746112926,
+    "event_trigger": "File '/etc/udev/rules.d/70-snap.brave.rules' added Mode: scheduled",
+    "rule": {
+        "id": "550",
+        "name": "sedexp_udev",
+        "description": "Detects changes to udev rules, used by sedexp malware",
+        "conditions": {
+            "startswith": "File '/etc/udev/rules.d/"
+        },
+        "ext": {
+            "mitre": "T1546.017",
+            "tag": "linux"
+        }
+    },
+    "context": [
+        "File '/etc/systemd/system/snapd.mounts.target.wants/snap-brave-484.mount' added\nMode: scheduled",
+        "File '/etc/systemd/system/snapd.mounts.target.wants/snap-brave-484.mount' added\nMode: scheduled",
+        "File '/etc/cups/subscriptions.conf.O' modified\nMode: scheduled\nChanged attributes: mtime,md5,sha1,sha256\nOld modification time was: '1741694967', now it is '1741740467'\nOld md5sum was: 'f9d49772185886e575bf5cd67712dd2f'\nNew md5sum is : 'db74b258d2518f0c332f28d9fb848558'\nOld sha1sum was: 'f5c52f26b34894d490cb8252ad57807807dc4b12'\nNew sha1sum is : '13773dbb80c898a29190f81180c0b3c0ce9e330f'\nOld sha256sum was: '24955af79c245c79d42fee5aae3d83609a0235d07aa1cac4c39070d2c52bfe6c'\nNew sha256sum is : '89d3671d4b309781f6461962e8e9feeec3a92365824138009273c2ecec7c1c6b'",
+        "File '/etc/systemd/system/multi-user.target.wants/snap-firefox-5783.mount' deleted\nMode: scheduled",
+        "File '/etc/systemd/system/snap-firefox-5783.mount' deleted\nMode: scheduled",
+        "File '/etc/cups/subscriptions.conf' modified\nMode: scheduled Changed attributes: inode,mtime,md5,sha1,sha256 Old modification time was: '1741698467', now it is '1741743967' Old inode was: '3408144', now it is '3407876' Old md5sum was: 'b316d261260ac07e1d76ecf7171be46b'New md5sum is : 'a77b841777a52e58b451a188202b49e6' Old sha1sum was: '80d05085a47467eb0ca1e08883d5bb3f3a6e751c'New sha1sum is : 'de4d8fbf9b65a5be16c81d5b1802fee88a5af372' Old sha256sum was: '9cc39b2a96ac2bfbdab0433c49efe691810bea411e9a7bdc7ecfa1036dd96b85' New sha256sum is : '5f41035ed5f4bc26316fcdf4dee423a2c7b8eddd56507e98eb9f04af6751d0c5'"
+    ]
+}

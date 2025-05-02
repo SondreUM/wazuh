@@ -1,7 +1,5 @@
 #include "detect.h"
 #include "agentd.h"
-#include "rule.h"
-#include "shared.h"
 #include <cjson/cJSON.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -22,34 +20,36 @@ void testable_detectmon_thread()
 #define STATIC static
 #endif
 
-/* datastructure for storing log events in the buffer */
-typedef struct __attribute__((__packed__)) log_entry
-{
-    size_t size;    // size of the log entry
-    char log_entry; // log entry start
-} log_entry_t;      // pack and order the structure
+/* Util functions */
+static inline int log_find_timestamp(time_t timestamp);
+static inline int oldest_hre();
+static inline int num_hre();
 
 /* agent detection state */
 agent_detect_state_t detect_state = {.state = STATUS_NORMAL, .hre = NULL, .last_detection = 0};
+
+/* Context log buffer */
 // rotating log event buffer
 log_buffer_t log_buffer[MAX_LOG_DURATION];
+// index of the active log buffer
 static int log_buffer_idx = 0;
+// index of the detecion agent
 static int log_detect_idx = 0;
-
-// rules array
-static detect_rule_t* rules[DETECT_RULE_MAX] = {NULL}; // Array of rules
-
-// mutex for the detection state
-static pthread_mutex_t state_mutex;
 // mutex for the log buffer
 static pthread_mutex_t log_mutex;
+
+/* Detection rules */
+// mutex for the detection state
+static pthread_mutex_t state_mutex;
+// rules array
+static detect_rule_t* rules[DETECT_RULE_MAX] = {NULL}; // Array of rules
 
 void detect_init(const char* rule_dir)
 {
     // default rule directory
     if (rule_dir == NULL)
     {
-        rule_dir = FILTER_RULE_DIRECTORY;
+        rule_dir = DETECT_RULE_DIRECTORY;
     }
 
     // Initialize rules array
@@ -58,18 +58,19 @@ void detect_init(const char* rule_dir)
         rules[i] = NULL;
     }
     // Parse rules from the directory
-    int num_rules = parse_rules(rule_dir, rules);
+    int num_rules = parse_rules(rule_dir, rules, DETECT_RULE_MAX);
     if (num_rules < 0)
     {
         merror("Failed to parse rules from directory: %s", rule_dir);
         return;
     }
-    mdebug1("Parsed %d rules from directory: %s", num_rules, rule_dir);
+    minfo("Loaded %d rule(s) from '%s'", num_rules, rule_dir);
 
-    // Initialize mutexes
+    // initialize mutexes
     pthread_mutex_init(&state_mutex, NULL);
     pthread_mutex_init(&log_mutex, NULL);
 
+    // initialize the log buffer with empty values
     for (int i = 0; i < MAX_LOG_DURATION; i++)
     {
         log_buffer[i].timestamp = 0;
@@ -78,6 +79,7 @@ void detect_init(const char* rule_dir)
         log_buffer[i].buffer = NULL;
     }
 
+    // initialize the HRE array
     for (int i = 0; i < MAX_HRE; i++)
     {
         detect_state.hre[i] = NULL;
@@ -88,66 +90,13 @@ void detect_init(const char* rule_dir)
     // rules = parse_rule();
 }
 
-/**
- * @brief Finds the index of the log buffer with the given timestamp.
- *
- * @param timestamp Timestamp to search for.
- * @return int Index of the log buffer with the given timestamp, or -1 if not found.
- */
-static inline int log_find_timestamp(time_t timestamp)
+detect_state_t detect_get_state()
 {
-    for (int i = 0; i < MAX_LOG_DURATION; i++)
-    {
-        if (log_buffer[i].timestamp == timestamp)
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
-/**
- * @brief Counts the number of HREs in the array.
- * Type: helper function
- *
- * @return int Number of HREs in the array.
- */
-static inline int num_hre()
-{
-    int count = 0;
-    for (int i = 0; i < MAX_HRE; i++)
-    {
-        if (detect_state.hre[i] != NULL)
-        {
-            count++;
-        }
-    }
-    return count;
-}
-
-/**
- * @brief Finds the index of the oldest HRE in the array.
- * Type: helper function
- *
- * @return int Index of the oldest HRE, or -1 if not found.
- */
-static inline int oldest_hre()
-{
-    int oldest = -1;
-    time_t oldest_time = 0;
-    for (int i = 0; i < MAX_HRE; i++)
-    {
-        if (detect_state.hre[i] == NULL)
-        {
-            continue;
-        }
-        if (oldest == -1 || detect_state.hre[i]->timestamp < oldest_time)
-        {
-            oldest = i;
-            oldest_time = detect_state.hre[i]->timestamp;
-        }
-    }
-    return oldest;
+    detect_state_t state;
+    pthread_mutex_lock(&state_mutex);
+    state = detect_state.state;
+    pthread_mutex_unlock(&state_mutex);
+    return state;
 }
 
 void delete_hre(hre_t* hre)
@@ -222,7 +171,9 @@ void dispatch_hre(hre_t* hre)
 
     // TODO: limit the context length to a maximum size
     // copy the context to the HRE
-    hre->context = malloc(context_length + 1);
+    hre->context = malloc(MIN(context_length + 1, MAX_CONTEXT_SIZE));
+    hre->context[0] = '\0';
+
     if (hre->context == NULL)
     {
         pthread_mutex_unlock(&log_mutex);
@@ -262,26 +213,28 @@ void dispatch_hre(hre_t* hre)
         return;
     }
 
+    // format the message
+
     // queue the event for sending
-    buffer_append(event);
-    mdebug1("Dispatching HRE: %s", event);
+
+    if (send_msg(event, strlen(event)) < 0)
+    {
+        merror("Failed to send the HRE message.");
+        free(event);
+        return;
+    }
+    free(event);
+    w_agentd_state_update(INCREMENT_MSG_COUNT, NULL);
+
+    mdebug1("Dispatched HRE: %s", event);
     // free the event message
     free(event);
     // remove the HRE from the array
     delete_hre(hre);
 }
 
-detect_state_t detect_get_state()
-{
-    detect_state_t state;
-    pthread_mutex_lock(&state_mutex);
-    state = detect_state.state;
-    pthread_mutex_unlock(&state_mutex);
-    return state;
-}
-
 /**
- * @brief checks HREs and dispatches completed events.
+ * @brief checks the state of HREs and dispatches completed events.
  * requires the state_mutex to be aquired before calling.
  */
 static void hre_update()
@@ -341,7 +294,7 @@ int detect_buffer_push(const char* entry, size_t size)
         // check if the buffer will overflow, reallocate if needed
         if (current->cursor + size > current->size)
         {
-            current->buffer = realloc(current->buffer, current->size + size + sizeof(log_entry_t));
+            current->buffer = realloc(current->buffer, current->size + size + 1);
         }
     }
     // timestamp do not exist, create a new log buffer
@@ -374,6 +327,7 @@ int detect_buffer_push(const char* entry, size_t size)
         current->timestamp = now;
         current->cursor = 0;
         current->buffer[0] = '\0';
+        current->buffer[current->size - 1] = '\0';
     }
 
     // ensure that buffer really exists before writing to it
@@ -383,10 +337,7 @@ int detect_buffer_push(const char* entry, size_t size)
         pthread_mutex_unlock(&log_mutex);
         return -1;
     }
-    // insert the size of the entry at the beginning
-    // uses the log_entry_t struct to store the size of the entry
-    log_entry_t* current_entry = (log_entry_t*)(current->buffer + current->cursor);
-    current_entry->size = size;
+    current_entry_len += size;
     // append the entry to the buffer
     memcpy(&current_entry->log_entry, entry, size);
     // ensure that the entry is null terminated
@@ -402,23 +353,26 @@ int detect_buffer_push(const char* entry, size_t size)
     return 0;
 }
 
-detect_state_t detect_update(hre_t* new_hre)
+detect_state_t insert_hre(hre_t* new_hre)
 {
     pthread_mutex_lock(&state_mutex);
 
     // if a new HRE is provided, add it to the list
     if (new_hre != NULL)
     {
-        // if the HRE array is full, delete the oldest HRE
+        mdebug1("Inserting new HRE: %s", new_hre->event_trigger);
+        mdebug2(format_hre(new_hre));
+        // if the HRE array is full, dispatch the oldest HRE
         if (num_hre() <= MAX_HRE)
         {
             int oldest = oldest_hre();
+            // fallback to random if for some reason the oldest is not found
             if (oldest == -1)
             {
                 mwarn("Failed to find the oldest HRE.");
                 oldest = rand() % MAX_HRE;
-                dispatch_hre(detect_state.hre[oldest]);
             }
+            dispatch_hre(detect_state.hre[oldest]);
             detect_state.hre[oldest] = new_hre;
         }
         else
@@ -433,6 +387,7 @@ detect_state_t detect_update(hre_t* new_hre)
                 }
             }
         }
+        detect_state.state = STATUS_HRE;
     }
 
     pthread_mutex_unlock(&state_mutex);
@@ -461,15 +416,15 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
 
     int detections = 0;
     size_t read_cursor = 0;
-    log_entry_t* entry = NULL;
 
     // read each log entry in the buffer
     for (; read_cursor <= log_buffer->cursor;)
     {
-        entry = (log_entry_t*)(log_buffer->buffer + read_cursor);
+        // search for the next zero byte
+        size_t entry_len = strnlen(&log_buffer->buffer[read_cursor], log_buffer->cursor - read_cursor);
 
         // apply rules to the log entry
-        detect_rule_t* rule = scan_log(&entry->log_entry, entry->size);
+        detect_rule_t* rule = scan_log(&entry->log_entry, entry_len);
         if (rule != NULL)
         {
             // create a new HRE
@@ -481,20 +436,20 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
             }
             new_hre->rule = rule;
             new_hre->timestamp = log_buffer->timestamp;
-            new_hre->event_trigger = strndup(&entry->log_entry, entry->size);
+            new_hre->event_trigger = strndup(&entry->log_entry, entry_len);
             if (new_hre->event_trigger == NULL)
             {
                 merror("Failed to allocate memory for the event trigger.");
                 free(new_hre);
                 return -1;
             }
-            detect_update(new_hre);
+            insert_hre(new_hre);
             detections++;
         }
         // move the read cursor to the next log entry
-        read_cursor += entry->size + sizeof(log_entry_t);
-        // check if the read cursor is out of bounds
-        if (read_cursor >= log_buffer->cursor)
+        read_cursor += entry_len + 1
+                       // check if the read cursor is out of bounds
+                       if (read_cursor >= log_buffer->cursor)
         {
             break;
         }
@@ -504,15 +459,22 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
 
 void* w_detectmon_thread(__attribute__((unused)) void* arg)
 {
-    mdebug1("Detect thread started");
+    mdebug1("Detect thread starting... time: %ld", time(NULL));
     while (1)
     {
-        mdebug1("Detect thread running, time: %ld", time(NULL));
         // scan the log buffer for new events
-        for (; log_detect_idx < log_buffer_idx; log_detect_idx++)
+        for (; log_detect_idx < log_buffer_idx; log_detect_idx = (log_detect_idx + 1) % MAX_LOG_DURATION)
         {
+            // check if the log buffer is empty
+            if (log_buffer[log_detect_idx].cursor == 0 || log_buffer[log_detect_idx].buffer == NULL)
+            {
+                mdebug1("Log buffer %d is empty, skipping.", log_detect_idx);
+                continue;
+            }
+            // scan the log buffer for events
+            prune_log_buffer(&log_buffer[log_detect_idx]);
             int detections = scan_log_buffer(&log_buffer[log_detect_idx]);
-            mdebug1("Detected %d events in log buffer %d", detections, log_detect_idx);
+            mdebug1("Found %d HRE(s) in log buffer %d", detections, log_detect_idx);
         }
 
         // update the agent state
@@ -525,71 +487,201 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
 
 /* Util */
 
+char* format_detect_rule_extension(const detect_rule_extension_t* ext)
+{
+    if (!ext)
+        return strdup("\"N/A\"");
+
+    char* name = ext->name ? ext->name : "N/A";
+    char* enabled = ext->enabled ? "true" : "false";
+
+    char* buffer;
+    asprintf(&buffer, "{ \"name\": \"%s\", \"enabled\": %s }", name, enabled);
+    return buffer;
+}
+
+char* format_detect_rule(const detect_rule_t* rule)
+{
+    if (!rule)
+        return strdup("\"N/A\"");
+
+    char* id = rule->id ? rule->id : "N/A";
+    char* name = rule->name ? rule->name : "N/A";
+    char* extension = format_detect_rule_extension(rule->extension);
+
+    // iterate over the conditions and format them
+    char* pattern = rule->pattern ? rule->pattern : "N/A";
+
+    char* buffer;
+    asprintf(&buffer,
+             "{ \"id\": \"%s\", \"name\": \"%s\", \"pattern\": \"%s\", \"extension\": %s }",
+             id,
+             name,
+             pattern,
+             extension);
+    free(extension);
+    return buffer;
+}
+
+char* format_context(const char* context)
+{
+    if (!context)
+        return strdup("\"N/A\"");
+
+    char* buffer;
+    asprintf(&buffer, "\"%s\"", context);
+    return buffer;
+}
+
 char* format_hre(const hre_t* hre)
 {
     if (!hre)
-        return NULL;
+        return strdup("\"N/A\"");
 
-    // Handle NULL strings safely
-    const char* event_trigger = hre->event_trigger ? hre->event_trigger : "(null)";
-    const char* context = hre->context ? hre->context : "(null)";
+    char* timestamp = ctime(&hre->timestamp);
+    char* rule = format_detect_rule(hre->rule);
+    char* event_trigger = hre->event_trigger ? hre->event_trigger : "N/A";
+    char* context = hre->context ? hre->context : "N/A";
 
-    // Format nested rule if present
-    char* rule_str = NULL;
-    const char* rule_display = "(null)";
-    if (hre->rule)
-    {
-        rule_str = format_detect_rule(hre->rule);
-        if (rule_str)
-        {
-            rule_display = rule_str;
-        }
-    }
-
-    // Calculate required buffer size
-    int len = snprintf(NULL,
-                       0,
-                       "hre_t {\n"
-                       "  timestamp: %ld\n"
-                       "  event_trigger: \"%s\"\n"
-                       "  context: \"%s\"\n"
-                       "  rule: %s\n"
-                       "}",
-                       (long)hre->timestamp,
-                       event_trigger,
-                       context,
-                       rule_display);
-
-    if (len < 0)
-    {
-        if (rule_str)
-            free(rule_str);
-        return NULL;
-    }
-
-    // Allocate and format
-    char* buf = malloc(len + 1);
-    if (!buf)
-    {
-        if (rule_str)
-            free(rule_str);
-        return NULL;
-    }
-
-    snprintf(buf,
-             len + 1,
-             "hre_t {\n"
-             "  timestamp: %ld\n"
-             "  event_trigger: \"%s\"\n"
-             "  context: \"%s\"\n"
-             "  rule: %s\n"
-             "}",
-             (long)hre->timestamp,
+    // Format the HRE as a JSON string
+    asprintf(&buffer,
+             "{\"timestamp\":\"%s\",\"event_trigger\":\"%s\",\"context\":\"%s\",\"rule\":%s}",
+             timestamp,
              event_trigger,
              context,
-             rule_display);
+             rule);
 
-    if (rule_str)
-        free(rule_str);
-    return buf;
+    char* buffer;
+    return buffer;
+}
+
+// char* format_hre(const hre_t* hre)
+// {
+//     if (!hre)
+//         return NULL;
+
+//     // Handle NULL strings safely
+//     const char* event_trigger = hre->event_trigger ? hre->event_trigger : "(null)";
+//     const char* context = hre->context ? hre->context : "(null)";
+
+//     // Format nested rule if present
+//     char* rule_str = NULL;
+//     const char* rule_display = "(null)";
+//     if (hre->rule)
+//     {
+//         rule_str = format_detect_rule(hre->rule);
+//         if (rule_str)
+//         {
+//             rule_display = rule_str;
+//         }
+//     }
+
+//     // Calculate required buffer size
+//     int len = snprintf(NULL,
+//                        0,
+//                        "hre_t {\n"
+//                        "  timestamp: %ld\n"
+//                        "  event_trigger: \"%s\"\n"
+//                        "  context: \"%s\"\n"
+//                        "  rule: %s\n"
+//                        "}",
+//                        (long)hre->timestamp,
+//                        event_trigger,
+//                        context,
+//                        rule_display);
+
+//     if (len < 0)
+//     {
+//         if (rule_str)
+//             free(rule_str);
+//         return NULL;
+//     }
+
+//     // Allocate and format
+//     char* buf = malloc(len + 1);
+//     if (!buf)
+//     {
+//         if (rule_str)
+//             free(rule_str);
+//         return NULL;
+//     }
+
+//     snprintf(buf,
+//              len + 1,
+//              "hre_t {\n"
+//              "  timestamp: %ld\n"
+//              "  event_trigger: \"%s\"\n"
+//              "  context: \"%s\"\n"
+//              "  rule: %s\n"
+//              "}",
+//              (long)hre->timestamp,
+//              event_trigger,
+//              context,
+//              rule_display);
+
+//     if (rule_str)
+//         free(rule_str);
+//     return buf;
+// }
+
+/**
+ * @brief Finds the index of the log buffer with the given timestamp.
+ *
+ * @param timestamp Timestamp to search for.
+ * @return int Index of the log buffer with the given timestamp, or -1 if not found.
+ */
+static inline int log_find_timestamp(time_t timestamp)
+{
+    for (int i = 0; i < MAX_LOG_DURATION; i++)
+    {
+        if (log_buffer[i].timestamp == timestamp)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * @brief Counts the number of HREs in the array.
+ * Type: helper function
+ *
+ * @return int Number of HREs in the array.
+ */
+static inline int num_hre()
+{
+    int count = 0;
+    for (int i = 0; i < MAX_HRE; i++)
+    {
+        if (detect_state.hre[i] != NULL)
+        {
+            count++;
+        }
+    }
+    return count;
+}
+
+/**
+ * @brief Finds the index of the oldest HRE in the array.
+ * Type: helper function
+ *
+ * @return int Index of the oldest HRE, or -1 if not found.
+ */
+static inline int oldest_hre()
+{
+    int oldest = -1;
+    time_t oldest_time = 0;
+    for (int i = 0; i < MAX_HRE; i++)
+    {
+        if (detect_state.hre[i] == NULL)
+        {
+            continue;
+        }
+        if (oldest == -1 || detect_state.hre[i]->timestamp < oldest_time)
+        {
+            oldest = i;
+            oldest_time = detect_state.hre[i]->timestamp;
+        }
+    }
+    return oldest;
 }

@@ -9,7 +9,6 @@
  */
 
 #include "agentd.h"
-#include "detect/detect.h"
 #include "os_net/os_net.h"
 #include "shared.h"
 
@@ -144,6 +143,12 @@ void AgentdStart(int uid, int gid, const char* user, const char* group)
     w_agentd_state_init();
     w_create_thread(state_main, NULL);
 
+    // start dynamic detection module
+#ifdef DYNAMIC_DETECT
+    detect_init(NULL);
+    w_create_thread(w_detectmon_thread, (void*)NULL);
+#endif
+
     /* Set max fd for select */
     if (agt->sock > maxfd)
     {
@@ -175,12 +180,6 @@ void AgentdStart(int uid, int gid, const char* user, const char* group)
     // Start request module
     req_init();
     w_create_thread(req_receiver, NULL);
-
-    // start dynamic detection module
-#ifdef DYNAMIC_DETECT
-    detect_init(NULL);
-    w_create_thread(w_detectmon_thread, (void*)NULL);
-#endif
 
     /* Send agent stopped message at exit */
     atexit(send_agent_stopped_message);

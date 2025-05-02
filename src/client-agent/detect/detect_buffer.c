@@ -23,8 +23,8 @@ void prune_log_buffer(log_buffer_t* log_buffer)
         if (log_buffer->timestamp + MAX_LOG_DURATION < now)
         {
             log_buffer->timestamp = 0;
-            log_buffer->buffer = NULL;
             free(log_buffer->buffer);
+            log_buffer->buffer = NULL;
             log_buffer->size = 0;
             log_buffer->cursor = 0;
         }

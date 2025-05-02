@@ -30,6 +30,24 @@
 // string representation of the matchers
 static const char* DETECT_MATCH_STR[] = {"startswith", "endswith", "contains", "regex"};
 
+/**
+ * @brief allocates a string with the value "(null)".
+ *
+ * @return char* allocated string with the value "(null)".
+ */
+inline static char* null_string()
+{
+    const char null_str[] = "(null)";
+    char* tmp = malloc(strlen(null_str) + 1);
+    if (tmp)
+    {
+        strcpy(tmp, null_str);
+        tmp[strlen(null_str)] = '\0';
+        return tmp;
+    }
+    return NULL;
+}
+
 static inline int condition_matcher(const char* condition, size_t length)
 {
     if (condition == NULL || length <= 0)
@@ -136,7 +154,7 @@ detect_rule_t* parse_rule(const char* json_string)
                 continue;
             }
 
-            cond->string = strdup(cond_item->valuestring);
+            cond->pattern = strdup(cond_item->valuestring);
             rule->conditions[cond_idx++] = cond;
         }
         // NULL terminate the conditions array
@@ -181,36 +199,39 @@ detect_rule_t* parse_rule(const char* json_string)
     return rule;
 }
 
-int parse_rules(const char* rule_dir, detect_rule_t** rules)
+int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
 {
+    if (!rule_dir || !rules || max_rules <= 0)
+    {
+        merror("Invalid arguments to parse_rules");
+        return -1;
+    }
+
     DIR* dir;
     struct dirent* ent;
-    size_t capacity = 32;
     int count = 0;
 
-    rules = calloc(capacity, sizeof(detect_rule_t*));
-    if (!rules)
-        return -1;
-
-    for (int i = 0; i < capacity; i++)
+    for (int i = 0; i < max_rules; i++)
     {
         rules[i] = NULL;
     }
 
     if ((dir = opendir(rule_dir)) != NULL)
     {
+        mdebug2("Scanning directory: %s for dynamic rules", rule_dir);
         while ((ent = readdir(dir)) != NULL)
         {
-            // Check for .json extension
+            // check for .json extension
             char* ext = strrchr(ent->d_name, '.');
             if (!ext || strncmp(ext, ".json", sizeof(".json")) != 0)
                 continue;
 
-            // Build full path
+            // build full path
             char path[PATH_MAX];
             snprintf(path, sizeof(path), "%s/%s", rule_dir, ent->d_name);
 
-            // Open and read file
+            // open and read file
+            mdebug2("Reading rule file: %s\n", path);
             FILE* fp = fopen(path, "r");
             if (!fp)
             {
@@ -246,13 +267,13 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules)
             if (rule)
             {
                 // Resize array if needed
-                if (count >= (int)capacity - 1)
+                if (count >= (int)max_rules - 1)
                 {
-                    capacity *= 2;
-                    rules = realloc(*rules, capacity * sizeof(detect_rule_t*));
+                    max_rules *= 2;
+                    rules = realloc(*rules, max_rules * sizeof(detect_rule_t*));
                 }
                 rules[count++] = rule;
-                mdebug1("Parsed rule %ld: %s\n", rule->id, rule->name);
+                mdebug1("Parsed %ld rule(s) %s", rule->id, rule->name);
             }
         }
         closedir(dir);
@@ -284,7 +305,7 @@ void free_rule(detect_rule_t* rule)
     {
         for (int i = 0; rule->conditions[i] != NULL; i++)
         {
-            free(rule->conditions[i]->string);
+            free(rule->conditions[i]->pattern);
             free(rule->conditions[i]);
         }
         free(rule->conditions);
@@ -322,12 +343,14 @@ char* format_rule(detect_rule_t* rule)
     size_t size = sizeof(RULE_INFO) + strlen(rule->name) + strlen(rule->description);
     for (int i = 0; rule->conditions[i] != NULL; i++)
     {
-        size += strlen(rule->conditions[i]->string) + 1;
+        size += strlen(rule->conditions[i]->pattern) + 1;
     }
 
     char* buffer = malloc(size);
     if (!buffer)
         return NULL;
+
+    buffer[0] = '\0';
 
     // TODO: add conditions and extensions to the buffer
     // format the rule into the buffer
@@ -353,8 +376,8 @@ static char* format_extension(const detect_rule_extension_t* ext)
     if (!ext)
         return NULL;
 
-    const char* field = ext->field ? ext->field : "(null)";
-    const char* value = ext->value ? ext->value : "(null)";
+    const char* field = ext->field ? ext->field : null_string;
+    const char* value = ext->value ? ext->value : null_string;
 
     int len = snprintf(NULL, 0, "{ field: \"%s\", value: \"%s\" }", field, value);
     char* buf = malloc(len + 1);
@@ -368,7 +391,7 @@ static char* format_condition(const detect_rule_condition_t* cond)
         return NULL;
 
     const char* matcher = matcher_to_string(cond->matcher);
-    const char* string = cond->string ? cond->string : "(null)";
+    const char* string = cond->pattern ? cond->pattern : null_string;
 
     int len = snprintf(NULL, 0, "{ matcher: %s, string: \"%s\" }", matcher, string);
     char* buf = malloc(len + 1);
@@ -382,8 +405,8 @@ char* format_detect_rule(const detect_rule_t* rule)
         return NULL;
 
     // handle NULL values safely
-    const char* name = rule->name ? rule->name : "(null)";
-    const char* desc = rule->description ? rule->description : "(null)";
+    const char* name = rule->name ? rule->name : null_string;
+    const char* desc = rule->description ? rule->description : null_string;
 
     // calculate array sizes
     size_t num_conditions = 0;

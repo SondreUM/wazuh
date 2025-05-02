@@ -10,7 +10,7 @@
 static int matcher(detect_rule_condition_t* rule_condition, const char* message, size_t len)
 {
 
-    if (rule_condition == NULL || rule_condition->string == NULL)
+    if (rule_condition == NULL || rule_condition->pattern == NULL)
     {
         merror("NULL condition");
         return -1;
@@ -25,26 +25,26 @@ static int matcher(detect_rule_condition_t* rule_condition, const char* message,
     switch (rule_condition->matcher)
     {
         case STARTSWITH:
-            if (strncmp(message, rule_condition->string, len) == 0)
+            if (strncmp(message, rule_condition->pattern, len) == 0)
             {
                 return 1;
             }
             break;
         case ENDSWITH:
-            if (strcmp(message + strlen(message) - strlen(rule_condition->string), rule_condition->string) == 0)
+            if (strcmp(message + strlen(message) - strlen(rule_condition->pattern), rule_condition->pattern) == 0)
             {
                 return 1;
             }
             break;
         case CONTAINS:
-            if (strstr(message, rule_condition->string) != NULL)
+            if (strstr(message, rule_condition->pattern) != NULL)
             {
                 return 1;
             }
             break;
         case REGEX:
         {
-            if (regcomp(&regex, rule_condition->string, 0) != 0)
+            if (regcomp(&regex, rule_condition->pattern, 0) != 0)
             {
                 merror("Invalid regex");
                 return -1;

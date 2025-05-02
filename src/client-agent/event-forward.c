@@ -23,12 +23,7 @@
 void* EventForward()
 {
 #ifdef DYNAMIC_DETECT
-    detect_rule_t** discard_rules = filter_init(NULL);
-    if (discard_rules == NULL)
-    {
-        merror("Failed to initialize filter rules");
-        mwarn("Proceeding without filter rules");
-    }
+    filter_init(NULL);
 #endif
 
     ssize_t recv_b;
@@ -48,7 +43,7 @@ void* EventForward()
             detect_buffer_push(msg, recv_b);
 
             // check if the message should be discarded
-            if (filter_log_check(discard_rules, msg, recv_b) > 0)
+            if (filter_log_check(msg, recv_b) > 0)
             {
                 continue;
             }

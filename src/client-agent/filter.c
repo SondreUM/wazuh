@@ -1,3 +1,7 @@
+/* filter.c
+ * This file is part of the dynamic client-agent project.
+ */
+
 #include "detect/rule.h"
 
 #include "filter.h"
@@ -5,9 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static detect_rule_t* rules[FILTER_RULE_MAX] = {NULL}; // Array of rules
+// array containing filter rules
+static detect_rule_t* rules[FILTER_RULE_MAX];
 
-detect_rule_t** filter_init(const char* rule_dir)
+void filter_init(const char* rule_dir)
 {
 
     // default rule directory
@@ -23,14 +28,12 @@ detect_rule_t** filter_init(const char* rule_dir)
     }
 
     // Parse rules from the directory
-    detect_rule_t** rules = NULL;
-    parse_rules(rule_dir, rules);
-    if (rules == NULL)
+    int num_rules = parse_rules(rule_dir, rules, FILTER_RULE_MAX);
+    if (num_rules < 0)
     {
         merror("Failed to parse rules from directory: %s", rule_dir);
-        return NULL;
     }
-    return rules;
+    minfo("Loaded %d rule(s) from '%s'", num_rules, rule_dir);
 }
 
 void filter_free(detect_rule_t** rules)
@@ -58,7 +61,7 @@ void filter_free(detect_rule_t** rules)
  * @return int t
  he ID of the matching rule, or 0 if no match is found.
  */
-int filter_log_check(detect_rule_t** rules, const char* message, size_t length)
+int filter_log_check(const char* message, size_t length)
 {
     if (rules == NULL)
     {
@@ -76,7 +79,7 @@ int filter_log_check(detect_rule_t** rules, const char* message, size_t length)
         detect_rule_t* rule = rules[i];
         if (apply_rule(rule, message, length) == 0)
         {
-            mdebug1("Filter rule matched: %s, dropping\n", rule->name);
+            mdebug2("Filter rule matched: %s, dropping log entry %s\n", rule->name, message);
             return rule->id; // Rule matched
         }
     }

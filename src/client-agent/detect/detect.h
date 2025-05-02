@@ -3,19 +3,26 @@
 
 #include "rule.h"
 #include "shared.h"
+#include "state.h"
+#include "wazuhdb_op.h"
 #include <time.h>
 
-#define DYNAMIC_DETECT
-
+/* detection definitions  */
 // Maximum number of HREs to process concurrently
 #define MAX_HRE 10
 // Maximum duration of the log buffer in seconds
-#define MAX_LOG_DURATION        60
-#define INITIAL_LOG_BUFFER_SIZE 1024
-#define FILTER_RULE_DIRECTORY   "/var/ossec/etc/detect/"
-#define DETECT_RULE_MAX         100
+#define MAX_LOG_DURATION 60
+// Maximum number of rules to that can be loaded
+#define DETECT_RULE_MAX 100
+// Directory containing the detection rules
+// Each rule should be in a separate file, using the .json extension
+#define DETECT_RULE_DIRECTORY "/var/ossec/etc/detect/"
+#define MAX_CONTEXT_SIZE      OS_MAXSTR
+// size of the initial log buffer for each timestamp
+#define INITIAL_LOG_BUFFER_SIZE OS_BUFFER_SIZE
 
-static const char HRE_MESSAGE[] = "High Risk Event detected: %s, timestamp %ld, trigger %s, context: %s";
+static const char HRE_MESSAGE[] = "HRE detected: rule %s, trigger %s at %ld";
+static const char HRE_JSON_FORMAT[] = R"({"timestamp": %ld, "event_trigger": "%s", "rule": %s, "context": "%s"})";
 
 /**
  * @brief Current detection state of the agent.
@@ -81,12 +88,12 @@ void dispatch_hre(hre_t* hre);
 detect_state_t detect_get_state();
 
 /**
- * @brief updates the internal detection state of the agent
+ * @brief insert a new HRE, acti
  *
  * @param new new HRE to add to the list, NULL if no new HRE
  * @return detect_state_t the new state of the agent
  */
-detect_state_t detect_update(hre_t* new_hre);
+detect_state_t insert_hre(hre_t* new_hre);
 
 /**
  * @brief applies the detection rules to the log entry.
@@ -95,6 +102,15 @@ detect_state_t detect_update(hre_t* new_hre);
  * @return detect_rule_t* the rule that matched the entry, NULL if no rule matched
  */
 detect_rule_t* scan_log(const char* entry, size_t len);
+
+/**
+ * @brief scans the log buffer for events and applies rules to them.
+ * if a rule matches, it will create a new HRE and add it to the list.
+ *
+ * @param log_buffer the log buffer to scan.
+ * @return int the number of detections found in the log buffer.
+ */
+void prune_log_buffer(log_buffer_t* log_buffer);
 
 /**
  * @brief Pushes a log entry to the detection buffer.

@@ -4,7 +4,6 @@
 #include "shared.h"
 #include <cjson/cJSON.h>
 #include <stdint.h>
-#include <sys/types.h>
 #include <time.h>
 
 // Default values for before and after event windows
@@ -20,6 +19,10 @@
 #define RULE_MAX_DESC 256
 
 static const char RULE_INFO[] = "RuleID: %ld, Name: %s, Before: %ld, After: %ld, Description: %s";
+static const char RULE_JSON_FORMAT[] =
+    R"({ "id": %ld, "before": %ld, "after": %ld, "name": "%s", "description": "%s", "conditions": %s, "extensions": %s})";
+static const char RULE_EXT_JSON_FORMAT[] = R"({"field": "%s", "value": "%s"})";
+static const char RULE_COND_JSON_FORMAT[] = R"({"matcher": "%s", "string": "%s"})";
 
 typedef enum match_rule
 {
@@ -49,7 +52,7 @@ typedef struct detect_rule_extension
 typedef struct detect_rule_condition
 {
     match_rule_t matcher; ///< Matcher type
-    char* string;         ///< String to match
+    char* pattern;        ///< String to match
 } detect_rule_condition_t;
 
 /**
@@ -82,7 +85,7 @@ detect_rule_t* parse_rule(const char* json_string);
  * @param rules The array of rules to populate
  * @return int The number of rules parsed or -1 on error
  */
-int parse_rules(const char* rule_dir, detect_rule_t** rules);
+int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules);
 
 /**
  * @brief Free a rule and all its resources

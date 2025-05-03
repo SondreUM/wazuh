@@ -35,6 +35,9 @@
 #define FILE_OFFSET_BITS 64
 #endif /* FILE_OFFSET_BITS */
 
+// define to enable dynamic detection
+#define DYNAMIC_DETECT
+
 /* Global headers */
 #include <sys/types.h>
 #include <sys/stat.h>

@@ -36,19 +36,19 @@ void filter_init(const char* rule_dir)
     minfo("Loaded %d rule(s) from '%s'", num_rules, rule_dir);
 }
 
-void filter_free(detect_rule_t** rules)
+void filter_free(detect_rule_t** rule)
 {
-    if (rules == NULL)
+    if (rule == NULL)
     {
         merror("Invalid rules array");
         return;
     }
 
     // Free each rule
-    for (int i = 0; rules[i] != NULL; i++)
+    for (int i = 0; rule[i] != NULL; i++)
     {
-        free_rule(rules[i]);
-        rules[i] = NULL;
+        free_rule(rule[i]);
+        rule[i] = NULL;
     }
 }
 
@@ -63,12 +63,8 @@ void filter_free(detect_rule_t** rules)
  */
 int filter_log_check(const char* message, size_t length)
 {
-    if (rules == NULL)
-    {
-        mdebug1("No filter rules loaded");
-        return 0;
-    }
-    else if (message == NULL || length <= 0)
+
+    if (message == NULL || length <= 0)
     {
         merror("Invalid arguments");
         return -1;

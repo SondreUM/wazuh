@@ -104,15 +104,6 @@ detect_state_t insert_hre(hre_t* new_hre);
 detect_rule_t* scan_log(const char* entry, size_t len);
 
 /**
- * @brief scans the log buffer for events and applies rules to them.
- * if a rule matches, it will create a new HRE and add it to the list.
- *
- * @param log_buffer the log buffer to scan.
- * @return int the number of detections found in the log buffer.
- */
-void prune_log_buffer(log_buffer_t* log_buffer);
-
-/**
  * @brief Pushes a log entry to the detection buffer.
  * This function will append the entry to the buffer and update the size.
  *

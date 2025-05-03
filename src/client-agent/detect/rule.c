@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>
 #include <sys/stat.h>
 #include <time.h>
 
@@ -84,7 +85,7 @@ detect_rule_t* parse_rule(const char* json_string)
     if (name && cJSON_IsString(name))
     {
         size_t len = strlen(name->valuestring);
-        rule->name = strndup(name->valuestring, len ? len < RULE_MAX_NAME : RULE_MAX_NAME);
+        rule->name = strndup(name->valuestring, MIN(len, RULE_MAX_NAME));
     }
     else
     {
@@ -207,7 +208,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
 
     if ((dir = opendir(rule_dir)) != NULL)
     {
-        mdebug2("Scanning directory: %s for dynamic rules", rule_dir);
+        mdebug1("Scanning directory: %s for dynamic rules", rule_dir);
         while ((ent = readdir(dir)) != NULL)
         {
             // check for .json extension
@@ -220,7 +221,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
             snprintf(path, sizeof(path), "%s/%s", rule_dir, ent->d_name);
 
             // open and read file
-            mdebug2("Reading rule file: %s\n", path);
+            mdebug1("Reading rule file: %s\n", path);
             FILE* fp = fopen(path, "r");
             if (!fp)
             {
@@ -262,7 +263,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
                     rules = (detect_rule_t**)realloc(*rules, max_rules * sizeof(detect_rule_t*));
                 }
                 rules[count++] = rule;
-                mdebug1("Parsed %ld rule(s) %s", rule->id, rule->name);
+                mdebug1("Parsed rule: {%ld: %s}", rule->id, rule->name);
             }
         }
         closedir(dir);

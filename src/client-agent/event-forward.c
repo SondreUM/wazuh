@@ -9,7 +9,6 @@
  */
 
 #include "agentd.h"
-#include "detect/detect.h"
 #include "os_net/os_net.h"
 #include "sec.h"
 #include "shared.h"
@@ -22,10 +21,6 @@
 /* Receive a message locally on the agent and forward it to the manager */
 void* EventForward()
 {
-#ifdef DYNAMIC_DETECT
-    filter_init(NULL);
-#endif
-
     ssize_t recv_b;
     char msg[OS_MAXSTR + 1];
 
@@ -36,15 +31,18 @@ void* EventForward()
     while ((recv_b = recv(agt->m_queue, msg, OS_MAXSTR, MSG_DONTWAIT)) > 0)
     {
         msg[recv_b] = '\0';
-        mdebug2("Received message: %s", msg);
 #ifdef DYNAMIC_DETECT
-        // send message to detectmon
-        detect_buffer_push(msg, recv_b);
-
-        // check if the message should be discarded
-        if (filter_log_check(msg, recv_b) > 0)
+        if (recv_b > 0 && msg)
         {
-            continue;
+            mdebug2("Received message: %s", msg);
+            // send message to detectmon
+            detect_buffer_push(msg, recv_b);
+
+            // check if the message should be discarded
+            if (filter_log_check(msg, recv_b) > 0)
+            {
+                continue;
+            }
         }
 #endif
         if (agt->buffer)

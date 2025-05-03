@@ -123,13 +123,25 @@ void prune_log_buffer(log_buffer_t* log_buffer);
 int detect_buffer_push(const char* entry, size_t size);
 
 /**
- * @brief Formats an hre_t struct into a printable string
- * @param hre Pointer to hre_t struct to format
- * @return char* Allocated string containing formatted output
+ * @brief Formats a log buffer into a JSON array
  *
- * Caller must free the returned string with free()
+ * @param array NULL or a cJSON array to append to
+ * @param buffer log_buffer_t* buffer to format
+ * @return cJSON* JSON array containing the formatted log entries
  */
-char* format_hre(const hre_t* hre);
+cJSON* format_buffer2json(cJSON* array, log_buffer_t* buffer);
+
+/**
+ * @brief Formats a detect_rule_t struct into a printable string
+ * Uses cJSON to format the HRE into a JSON string.
+ *
+ * @param rule pointer to detect_rule_t struct to format
+ * @param context_array cJSON array containing the context
+ * @return char* allocated string containing formatted output
+ *
+ * Caller is responsible for freeing the returned string with free()
+ */
+char* format_hre_2json(hre_t* hre, cJSON* context_array);
 
 /**
  * @brief Thread to update the detection state.

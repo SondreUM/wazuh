@@ -36,18 +36,19 @@ void* EventForward()
     while ((recv_b = recv(agt->m_queue, msg, OS_MAXSTR, MSG_DONTWAIT)) > 0)
     {
         msg[recv_b] = '\0';
+        mdebug2("Received message: %s", msg);
+#ifdef DYNAMIC_DETECT
+        // send message to detectmon
+        detect_buffer_push(msg, recv_b);
+
+        // check if the message should be discarded
+        if (filter_log_check(msg, recv_b) > 0)
+        {
+            continue;
+        }
+#endif
         if (agt->buffer)
         {
-#ifdef DYNAMIC_DETECT
-            // send message to detectmon
-            detect_buffer_push(msg, recv_b);
-
-            // check if the message should be discarded
-            if (filter_log_check(msg, recv_b) > 0)
-            {
-                continue;
-            }
-#endif
             if (buffer_append(msg) < 0)
             {
                 break;

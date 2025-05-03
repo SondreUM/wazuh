@@ -73,9 +73,9 @@ int filter_log_check(const char* message, size_t length)
     for (int i = 0; rules[i] != NULL; i++)
     {
         detect_rule_t* rule = rules[i];
-        if (apply_rule(rule, message, length) == 0)
+        if (apply_rule(rule, message, length) == 1)
         {
-            mdebug2("Filter rule matched: %s, dropping log entry %s\n", rule->name, message);
+            mdebug1("Filter rule matched: %s, dropping log entry %s\n", rule->name, message);
             return rule->id; // Rule matched
         }
     }

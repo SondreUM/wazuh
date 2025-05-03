@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>
 #include <sys/types.h>
 
 #include "rule.h"
@@ -25,7 +26,7 @@ static int matcher(detect_rule_condition_t* rule_condition, const char* message,
     switch (rule_condition->matcher)
     {
         case STARTSWITH:
-            if (strncmp(message, rule_condition->pattern, len) == 0)
+            if (strncmp(message, rule_condition->pattern, MIN(len, strlen(rule_condition->pattern))) == 0)
             {
                 return 1;
             }
@@ -77,6 +78,11 @@ int apply_rule(detect_rule_t* rule, const char* message, size_t len)
     detect_rule_condition_t* condition_iter = rule->conditions[0];
     for (int i = 0; condition_iter != NULL; i++)
     {
+        // mdebug2("Checking rule %s with mode %d\nPATTERN: %s\nMSG: %s",
+        //         rule->name,
+        //         condition_iter->matcher,
+        //         condition_iter->pattern,
+        //         message);
         if (matcher(condition_iter, message, len) == 1)
         {
             return 1;

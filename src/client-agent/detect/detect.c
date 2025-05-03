@@ -167,14 +167,14 @@ void dispatch_hre(hre_t* hre)
     char* hre_json = format_hre_2json(hre, context);
 
     // queue the event for sending
+    w_agentd_state_update(INCREMENT_MSG_COUNT, NULL);
     if (send_msg(hre_json, -1) < 0)
     {
         merror("Failed to send the HRE message.");
         free(hre_json);
         return;
     }
-    w_agentd_state_update(INCREMENT_MSG_COUNT, NULL);
-    mdebug2("Dispatched HRE: %s", hre_json);
+    mdebug1("Dispatched HRE: %s", hre_json);
 
     // free the event message
     free(hre_json);
@@ -231,7 +231,7 @@ detect_rule_t* scan_log(const char* entry, size_t len)
 
 int detect_buffer_push(const char* entry, size_t size)
 {
-    if (entry == NULL || size == 0)
+    if (entry == NULL || size <= 0)
     {
         merror("Invalid arguments to detect_buffer_push: size: %ld", size);
         return -1;
@@ -312,7 +312,7 @@ detect_state_t insert_hre(hre_t* new_hre)
     if (new_hre != NULL)
     {
         mdebug1("Inserting new HRE: %s", new_hre->event_trigger);
-        mdebug2("%s", format_hre_2json(new_hre, NULL));
+        mdebug1("%s", format_hre_2json(new_hre, NULL));
         // if the HRE array is full, dispatch the oldest HRE
         if (num_hre() <= MAX_HRE)
         {
@@ -361,7 +361,7 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
     }
     else if (log_buffer->cursor == 0 || log_buffer->buffer == NULL || log_buffer->timestamp == 0)
     {
-        mdebug2("Trying to scan an empty log buffer.");
+        mdebug1("Trying to scan an empty log buffer.");
         return -1;
     }
 
@@ -414,7 +414,8 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
     while (1)
     {
         // scan the log buffer for new events
-        for (; log_detect_idx < log_buffer_idx; log_detect_idx = (log_detect_idx + 1) % MAX_LOG_DURATION)
+        for (int detections = 0; log_detect_idx < log_buffer_idx;
+             log_detect_idx = (log_detect_idx + 1) % MAX_LOG_DURATION)
         {
             // check if the log buffer is empty
             if (log_buffer[log_detect_idx].cursor == 0 || log_buffer[log_detect_idx].buffer == NULL)
@@ -423,9 +424,13 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
                 continue;
             }
             // scan the log buffer for events
-            prune_log_buffer(&log_buffer[log_detect_idx]);
-            int detections = scan_log_buffer(&log_buffer[log_detect_idx]);
-            mdebug1("Found %d HRE(s) in log buffer %d", detections, log_detect_idx);
+            mdebug1("Scanning log buffer %ld, contains %ld bytes",
+                    log_buffer[log_detect_idx].timestamp,
+                    log_buffer[log_detect_idx].cursor);
+            detections = scan_log_buffer(&log_buffer[log_detect_idx]);
+            mdebug1("BUFFER: %s", log_buffer[log_detect_idx].buffer);
+            mdebug1(
+                "Scanned buffer for timestamp %ld, found %d HRE(s)", log_buffer[log_detect_idx].timestamp, detections);
         }
 
         // update the agent state

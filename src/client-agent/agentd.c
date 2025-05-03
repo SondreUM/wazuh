@@ -14,6 +14,7 @@
 
 #ifdef DYNAMIC_DETECT
 #include "detect/detect.h"
+#include "filter.h"
 #endif
 
 /* Start the agent daemon */
@@ -145,6 +146,7 @@ void AgentdStart(int uid, int gid, const char* user, const char* group)
 
     // start dynamic detection module
 #ifdef DYNAMIC_DETECT
+    filter_init(NULL);
     detect_init(NULL);
     w_create_thread(w_detectmon_thread, (void*)NULL);
 #endif

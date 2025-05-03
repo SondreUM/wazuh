@@ -20,9 +20,9 @@
 
 static const char RULE_INFO[] = "RuleID: %ld, Name: %s, Before: %ld, After: %ld, Description: %s";
 static const char RULE_JSON_FORMAT[] =
-    R"({ "id": %ld, "before": %ld, "after": %ld, "name": "%s", "description": "%s", "conditions": %s, "extensions": %s})";
+    R"({"id": %ld, "before": %ld, "after": %ld, "name": "%s", "description": "%s", "conditions": %s, "extensions": %s})";
 static const char RULE_EXT_JSON_FORMAT[] = R"({"field": "%s", "value": "%s"})";
-static const char RULE_COND_JSON_FORMAT[] = R"({"matcher": "%s", "string": "%s"})";
+static const char RULE_COND_JSON_FORMAT[] = R"({"matcher": "%s", "pattern": "%s"})";
 
 typedef enum match_rule
 {
@@ -32,7 +32,7 @@ typedef enum match_rule
     CONTAINS,               ///< Match the message
     REGEX,                  ///< Match the message with a regular expression
 
-    num_matchers
+    num_matchers ///< Number of matchers, should be last
 } match_rule_t;
 
 /**

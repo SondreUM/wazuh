@@ -14,9 +14,9 @@
 {
     "id": "1",
     "name": "sedexp",
-    "description": "Detects changes to udev rules, used by sedexp malware",
-    "before": 5,
-    "after": 5,
+    "description": "Detects changes to udev rules, used by sedexp malware", (optional)
+    "before": 5, (optional)
+    "after": 5, (optional)
     "conditions": {
         "startswith": "File '/etc/udev/rules.d/"
     },
@@ -28,25 +28,7 @@
  */
 
 // string representation of the matchers
-static const char* DETECT_MATCH_STR[] = {"startswith", "endswith", "contains", "regex"};
-
-/**
- * @brief allocates a string with the value "(null)".
- *
- * @return char* allocated string with the value "(null)".
- */
-inline static char* null_string()
-{
-    const char null_str[] = "(null)";
-    char* tmp = malloc(strlen(null_str) + 1);
-    if (tmp)
-    {
-        strcpy(tmp, null_str);
-        tmp[strlen(null_str)] = '\0';
-        return tmp;
-    }
-    return NULL;
-}
+static const char* RULE_MATCH_STR[] = {"startswith", "endswith", "contains", "regex"};
 
 static inline int condition_matcher(const char* condition, size_t length)
 {
@@ -58,7 +40,7 @@ static inline int condition_matcher(const char* condition, size_t length)
 
     for (int i = 0; i < num_matchers; i++)
     {
-        if (strncmp(DETECT_MATCH_STR[i], condition, length) == 0)
+        if (strncmp(RULE_MATCH_STR[i], condition, length) == 0)
         {
             return i;
         }
@@ -87,13 +69,19 @@ detect_rule_t* parse_rule(const char* json_string)
     rule->id = cJSON_GetObjectItem(root, "id")->valueint;
 
     tmp = cJSON_GetObjectItem(root, "before");
-    rule->before = tmp->valueint ? (cJSON_IsNumber(tmp)) : RULE_DEFAULT_BEFORE;
+    if (tmp && cJSON_IsNumber(tmp))
+        rule->before = tmp->valueint;
+    else
+        rule->before = RULE_DEFAULT_BEFORE;
 
     tmp = cJSON_GetObjectItem(root, "after");
-    rule->after = tmp->valueint ? (cJSON_IsNumber(tmp)) : RULE_DEFAULT_AFTER;
+    if (tmp && cJSON_IsNumber(tmp))
+        rule->after = tmp->valueint;
+    else
+        rule->after = RULE_DEFAULT_BEFORE;
 
     cJSON* name = cJSON_GetObjectItem(root, "name");
-    if (cJSON_IsString(name))
+    if (name && cJSON_IsString(name))
     {
         size_t len = strlen(name->valuestring);
         rule->name = strndup(name->valuestring, len ? len < RULE_MAX_NAME : RULE_MAX_NAME);
@@ -121,7 +109,8 @@ detect_rule_t* parse_rule(const char* json_string)
     if (cJSON_HasObjectItem(root, "conditions") == 1)
     {
         cJSON* conditions = cJSON_GetObjectItem(root, "conditions");
-        rule->conditions = calloc(cJSON_GetArraySize(conditions) + 1, sizeof(detect_rule_condition_t*));
+        rule->conditions =
+            (detect_rule_condition_t**)calloc(cJSON_GetArraySize(conditions) + 1, sizeof(detect_rule_condition_t*));
 
         int cond_idx = 0;
         cJSON* cond_item;
@@ -139,7 +128,7 @@ detect_rule_t* parse_rule(const char* json_string)
                 continue;
             }
 
-            detect_rule_condition_t* cond = calloc(1, sizeof(detect_rule_condition_t));
+            detect_rule_condition_t* cond = malloc(sizeof(detect_rule_condition_t));
             if (!cond)
             {
                 merror("Failed to allocate memory for condition\n");
@@ -170,7 +159,7 @@ detect_rule_t* parse_rule(const char* json_string)
     {
 
         cJSON* ext = cJSON_GetObjectItem(root, "ext");
-        rule->ext = calloc(cJSON_GetArraySize(ext) + 1, sizeof(detect_rule_extension_t*));
+        rule->ext = (detect_rule_extension_t**)calloc(cJSON_GetArraySize(ext) + 1, sizeof(detect_rule_extension_t*));
 
         int ext_idx = 0;
         cJSON* ext_item;
@@ -211,7 +200,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
     struct dirent* ent;
     int count = 0;
 
-    for (int i = 0; i < max_rules; i++)
+    for (int i = 0; i < (int)max_rules; i++)
     {
         rules[i] = NULL;
     }
@@ -270,7 +259,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
                 if (count >= (int)max_rules - 1)
                 {
                     max_rules *= 2;
-                    rules = realloc(*rules, max_rules * sizeof(detect_rule_t*));
+                    rules = (detect_rule_t**)realloc(*rules, max_rules * sizeof(detect_rule_t*));
                 }
                 rules[count++] = rule;
                 mdebug1("Parsed %ld rule(s) %s", rule->id, rule->name);
@@ -308,7 +297,7 @@ void free_rule(detect_rule_t* rule)
             free(rule->conditions[i]->pattern);
             free(rule->conditions[i]);
         }
-        free(rule->conditions);
+        free(*rule->conditions);
     }
 
     // Free extensions
@@ -320,180 +309,8 @@ void free_rule(detect_rule_t* rule)
             free(rule->ext[i]->value);
             free(rule->ext[i]);
         }
-        free(rule->ext);
+        free(*rule->ext);
     }
 
     free(rule);
-}
-
-/**
- * @brief formats a rule into a printable string
- *
- * @param rule the rule to format
- * @return char* formatted string, or NULL on failure
- * caller is responsible for freeing the string
- * @note the string is formatted as follows:
- * "RuleID: %d, Name: %s, Description: %s, Before: %ld, After: %ld"
- */
-char* format_rule(detect_rule_t* rule)
-{
-    if (!rule)
-        return NULL;
-    // calculate the size of the buffer
-    size_t size = sizeof(RULE_INFO) + strlen(rule->name) + strlen(rule->description);
-    for (int i = 0; rule->conditions[i] != NULL; i++)
-    {
-        size += strlen(rule->conditions[i]->pattern) + 1;
-    }
-
-    char* buffer = malloc(size);
-    if (!buffer)
-        return NULL;
-
-    buffer[0] = '\0';
-
-    // TODO: add conditions and extensions to the buffer
-    // format the rule into the buffer
-    snprintf(buffer, size, RULE_INFO, rule->id, rule->name, rule->before, rule->after, rule->description);
-    return buffer;
-}
-
-inline static const char* matcher_to_string(match_rule_t matcher)
-{
-    switch (matcher)
-    {
-        case STARTSWITH: return "STARTSWITH";
-        case ENDSWITH: return "ENDSWITH";
-        case CONTAINS: return "CONTAINS";
-        case REGEX: return "REGEX";
-        case UNDEFINED_MATCHER:
-        default: return "UNDEFINED_MATCHER";
-    }
-}
-
-static char* format_extension(const detect_rule_extension_t* ext)
-{
-    if (!ext)
-        return NULL;
-
-    const char* field = ext->field ? ext->field : null_string;
-    const char* value = ext->value ? ext->value : null_string;
-
-    int len = snprintf(NULL, 0, "{ field: \"%s\", value: \"%s\" }", field, value);
-    char* buf = malloc(len + 1);
-    snprintf(buf, len + 1, "{ field: \"%s\", value: \"%s\" }", field, value);
-    return buf;
-}
-
-static char* format_condition(const detect_rule_condition_t* cond)
-{
-    if (!cond)
-        return NULL;
-
-    const char* matcher = matcher_to_string(cond->matcher);
-    const char* string = cond->pattern ? cond->pattern : null_string;
-
-    int len = snprintf(NULL, 0, "{ matcher: %s, string: \"%s\" }", matcher, string);
-    char* buf = malloc(len + 1);
-    snprintf(buf, len + 1, "{ matcher: %s, string: \"%s\" }", matcher, string);
-    return buf;
-}
-
-char* format_detect_rule(const detect_rule_t* rule)
-{
-    if (!rule)
-        return NULL;
-
-    // handle NULL values safely
-    const char* name = rule->name ? rule->name : null_string;
-    const char* desc = rule->description ? rule->description : null_string;
-
-    // calculate array sizes
-    size_t num_conditions = 0;
-    if (rule->conditions)
-    {
-        while (rule->conditions[num_conditions]) num_conditions++;
-    }
-
-    size_t num_extensions = 0;
-    if (rule->ext)
-    {
-        while (rule->ext[num_extensions]) num_extensions++;
-    }
-
-    // calculate buffer size
-    int len = snprintf(NULL,
-                       0,
-                       "detect_rule_t {\n"
-                       "  id: %" PRId64 "\n"
-                       "  before: %ld\n"
-                       "  after: %ld\n"
-                       "  name: \"%s\"\n"
-                       "  description: \"%.100s%s\"\n",
-                       rule->id,
-                       (long)rule->before,
-                       (long)rule->after,
-                       name,
-                       desc,
-                       (strlen(desc) > 100 ? "..." : ""));
-
-    // add conditions space
-    len += snprintf(NULL, 0, "  conditions: [\n");
-    for (size_t i = 0; i < num_conditions; i++)
-    {
-        char* cond_str = format_condition(rule->conditions[i]);
-        len += snprintf(NULL, 0, "    %s%s\n", cond_str, (i < num_conditions - 1) ? "," : "");
-        free(cond_str);
-    }
-    len += snprintf(NULL, 0, "  ]\n");
-
-    // add extensions space
-    len += snprintf(NULL, 0, "  extensions: [\n");
-    for (size_t i = 0; i < num_extensions; i++)
-    {
-        char* ext_str = format_extension(rule->ext[i]);
-        len += snprintf(NULL, 0, "    %s%s\n", ext_str, (i < num_extensions - 1) ? "," : "");
-        free(ext_str);
-    }
-    len += snprintf(NULL, 0, "  ]\n}\n");
-
-    // allocate and build string
-    char* buf = malloc(len + 1);
-    char* ptr = buf;
-
-    ptr += snprintf(ptr,
-                    len + 1,
-                    "detect_rule_t {\n"
-                    "  id: %" PRId64 "\n"
-                    "  before: %ld\n"
-                    "  after: %ld\n"
-                    "  name: \"%s\"\n"
-                    "  description: \"%.100s%s\"\n",
-                    rule->id,
-                    (long)rule->before,
-                    (long)rule->after,
-                    name,
-                    desc,
-                    (strlen(desc) > 100 ? "..." : ""));
-
-    ptr += sprintf(ptr, "  conditions: [\n");
-    for (size_t i = 0; i < num_conditions; i++)
-    {
-        char* cond_str = format_condition(rule->conditions[i]);
-        ptr += sprintf(ptr, "    %s%s\n", cond_str, (i < num_conditions - 1) ? "," : "");
-        free(cond_str);
-    }
-    ptr += sprintf(ptr, "  ]\n");
-
-    ptr += sprintf(ptr, "  extensions: [\n");
-    for (size_t i = 0; i < num_extensions; i++)
-    {
-        char* ext_str = format_extension(rule->ext[i]);
-        ptr += sprintf(ptr, "    %s%s\n", ext_str, (i < num_extensions - 1) ? "," : "");
-        free(ext_str);
-    }
-    // sprintf appends a null terminator
-    sprintf(ptr, "  ]\n}\n");
-
-    return buf;
 }

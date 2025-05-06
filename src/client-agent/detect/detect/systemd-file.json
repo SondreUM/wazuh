@@ -1,0 +1,16 @@
+{
+    "id": 2,
+    "name": "systemd-file",
+    "description": "Detects changes to systemd unit files",
+    "before": 3,
+    "after": 2,
+    "conditions": [
+        {
+            "contains": "File '/etc/systemd/"
+        }
+    ],
+    "ext": {
+        "tag": "linux",
+        "service": "systemd"
+    }
+}

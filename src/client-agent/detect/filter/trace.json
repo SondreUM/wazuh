@@ -1,0 +1,13 @@
+{
+    "id": 1003,
+    "name": "drop trace",
+    "description": "Remove trace level logs",
+    "conditions": [
+        {
+            "contains": "TRACE"
+        }
+    ],
+    "ext": {
+        "tag": "level"
+    }
+}

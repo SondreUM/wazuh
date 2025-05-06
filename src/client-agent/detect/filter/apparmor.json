@@ -1,0 +1,13 @@
+{
+    "id": 2001,
+    "name": "apparmor",
+    "description": "Ignor apparmor denied logs",
+    "conditions": [
+        {
+            "contains": "apparmor=\"DENIED\""
+        }
+    ],
+    "ext": {
+        "tag": "linux"
+    }
+}

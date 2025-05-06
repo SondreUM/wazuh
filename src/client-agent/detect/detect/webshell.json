@@ -1,0 +1,17 @@
+{
+    "id": 1,
+    "name": "WebShell",
+    "description": "New or modified scripts in /etc/httpd/ that are likely web shell",
+    "before": 5,
+    "after": 5,
+    "conditions": [
+        {
+            "regex": "File /var/www/.+\\.ph(p([3457s]|\\-s)?|t|tml)$"
+        }
+    ],
+    "ext": {
+        "tag": "linux:debian,ubuntu",
+        "service": "apache",
+        "mitre": "T1505.003"
+    }
+}

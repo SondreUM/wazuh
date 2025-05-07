@@ -35,7 +35,7 @@
 #define FILE_OFFSET_BITS 64
 #endif /* FILE_OFFSET_BITS */
 
-// define to enable dynamic detection
+// Enable dynamic detection
 #define DYNAMIC_DETECT
 
 /* Global headers */

@@ -2087,11 +2087,36 @@ wazuh-remoted: ${remoted_o}
 client_agent_c := $(wildcard client-agent/*.c)
 client_agent_o := $(client_agent_c:.c=.o)
 
-client-agent/%.o: client-agent/%.c
-	${OSSEC_CC} ${OSSEC_CFLAGS} -I./client-agent -DARGV0=\"wazuh-agentd\" -c $^ -o $@
+client_detect_c := $(wildcard client-agent/detect/*.c)
+client_detect_o := $(client_detect_c:.c=.o)
 
-wazuh-agentd: ${client_agent_o} monitord/rotate_log.o monitord/compress_log.o
+client-agent/%.o: client-agent/%.c
+	${OSSEC_CC} ${OSSEC_CFLAGS} -I./client-agent -I.client_agent/detect -DARGV0=\"wazuh-agentd\" -c $^ -o $@
+
+wazuh-agentd: ${client_agent_o} ${client_detect_o} monitord/rotate_log.o monitord/compress_log.o
 	${OSSEC_CCBIN} ${OSSEC_LDFLAGS} $^ ${OSSEC_LIBS} -o $@
+
+## Detection module targets
+DETECT_SRC = agentd/detect/*.c
+DETECT_DEPS = -lpthread
+
+detect_module: deps
+	$(CC) -o wazuh-detect-module $(DETECT_SRC) $(CFLAGS) $(LDFLAGS) $(DETECT_DEPS)
+
+## Filtering module targets
+FILTER_SRC = agentd/filter/*.c
+
+filter_module: deps
+	$(CC) -o wazuh-filter-module $(FILTER_SRC) $(CFLAGS) $(LDFLAGS)
+
+
+# dynamic wazuh-agentd
+wazuh-agentd-dynamic: ${client_agent_o} monitord/rotate_log.o monitord/compress_log.o
+	${OSSEC_CCBIN} ${OSSEC_LDFLAGS} -Wl,-rpath,${WAZUHEXT_LIB} $^ ${OSSEC_LIBS} -o $@
+
+agentd-detect: ${client_agent_o} 
+	${OSSEC_CC} ${OSSEC_CFLAGS} $^ ${OSSEC_LIBS} -o wazuh-detect ./client-agent/detect/*.c -lpthread $(CFLAGS) $(LDFLAGS)
+
 
 #### addagent ######
 
@@ -2779,6 +2804,7 @@ clean-internals: clean-unit-tests
 	rm -f ${remoted_o}
 	rm -f ${report_o}
 	rm -f ${client_agent_o}
+	rm -f ${client_detect_o}
 	rm -f ${addagent_o}
 	rm -f ${active_response_o} ${active_response_programs} firewall-drop
 	rm -f ${util_o} ${util_programs}

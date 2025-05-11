@@ -1,7 +1,7 @@
 #include "detect.h"
+#include "external/cJSON/cJSON.h"
 #include "rule.h"
 #include "shared.h"
-#include <cjson/cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

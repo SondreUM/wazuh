@@ -4,7 +4,6 @@
 #include "rule.h"
 #include "shared.h"
 #include "state.h"
-#include "wazuhdb_op.h"
 #include <time.h>
 
 /* detection definitions  */
@@ -16,7 +15,7 @@
 #define DETECT_RULE_MAX 100
 // Directory containing the detection rules
 // Each rule should be in a separate file, using the .json extension
-#define DETECT_RULE_DIRECTORY "/var/ossec/etc/detect/"
+#define DETECT_RULE_DIRECTORY "/var/ossec/etc/detect"
 #define MAX_CONTEXT_SIZE      OS_MAXSTR
 // size of the initial log buffer for each timestamp
 #define INITIAL_LOG_BUFFER_SIZE OS_BUFFER_SIZE

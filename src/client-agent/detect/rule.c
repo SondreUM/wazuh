@@ -1,9 +1,11 @@
 #include "rule.h"
+#include "external/cJSON/cJSON.h"
 #include "shared.h"
 #include <assert.h>
-#include <cjson/cJSON.h>
 #include <dirent.h>
 #include <inttypes.h>
+#include <limits.h>
+#include <linux/limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,9 +20,9 @@
     "description": "Detects changes to udev rules, used by sedexp malware", (optional)
     "before": 5, (optional)
     "after": 5, (optional)
-    "conditions": {
+    "conditions": [{
         "startswith": "File '/etc/udev/rules.d/"
-    },
+    }],
     "ext": {
         "tag": "linux",
         "mitre": "T1546.017"
@@ -49,7 +51,7 @@ static inline int condition_matcher(const char* condition, size_t length)
     return -1;
 }
 
-detect_rule_t* parse_rule(const char* json_string)
+detect_rule_t* parse_rule(const char* json_string, size_t max_len)
 {
     cJSON* root = cJSON_Parse(json_string);
     if (!root)
@@ -107,6 +109,16 @@ detect_rule_t* parse_rule(const char* json_string)
     }
 
     /* Parse conditions, optional */
+    /* Format
+     * "conditions": [
+     *     {
+     *         "match_rule_t": "pattern",
+     *     },
+     *     {
+     *         "contains": "sedexp"
+     *     }
+     * ]
+     */
     if (cJSON_HasObjectItem(root, "conditions") == 1)
     {
         cJSON* conditions = cJSON_GetObjectItem(root, "conditions");
@@ -115,37 +127,35 @@ detect_rule_t* parse_rule(const char* json_string)
 
         int cond_idx = 0;
         cJSON* cond_item;
+        // iterate over the conditions array
         cJSON_ArrayForEach(cond_item, conditions)
         {
-            if (cond_idx >= RULE_MAX_CONDITIONS)
+            // each object should have a single key-value pair
+            cJSON* tmp = cond_item->child;
+
+            // do not know the matcher type
+            if (cJSON_IsString(tmp) == 0)
             {
-                mdebug1("Too many conditions, truncating\n");
-                break;
+                merror("Invalid condition type: %d\n", tmp->type);
+                free_rule(rule);
+                cJSON_Delete(root);
+                return NULL;
             }
 
-            if (cond_item->type != cJSON_String)
+            detect_rule_condition_t* condition = calloc(1, sizeof(detect_rule_condition_t));
+            if (!condition)
             {
-                merror("Invalid condition type: %d\n", cond_item->type);
-                continue;
+                merror("Failed to allocate memory for condition");
+                free_rule(rule);
+                cJSON_Delete(root);
+                return NULL;
             }
 
-            detect_rule_condition_t* cond = malloc(sizeof(detect_rule_condition_t));
-            if (!cond)
-            {
-                merror("Failed to allocate memory for condition\n");
-                continue;
-            }
+            condition->matcher = condition_matcher(tmp->string, strlen(tmp->string));
+            condition->pattern = strdup(tmp->valuestring);
+            rule->conditions[cond_idx++] = condition;
 
-            cond->matcher = condition_matcher(cond_item->string, strlen(cond_item->string));
-            if (cond->matcher == UNDEFINED_MATCHER)
-            {
-                merror("Invalid matcher: %s\n", cond_item->string);
-                free(cond);
-                continue;
-            }
-
-            cond->pattern = strdup(cond_item->valuestring);
-            rule->conditions[cond_idx++] = cond;
+            cond_idx++;
         }
         // NULL terminate the conditions array
         rule->conditions[cond_idx] = NULL;
@@ -206,9 +216,17 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
         rules[i] = NULL;
     }
 
-    if ((dir = opendir(rule_dir)) != NULL)
+    // resolve directory path in case of symlinks
+    char resolved_path[PATH_MAX];
+    if (realpath(rule_dir, resolved_path) == NULL)
     {
-        mdebug1("Scanning directory: %s for dynamic rules", rule_dir);
+        merror("Failed to resolve path: %s\n", rule_dir);
+        return -1;
+    }
+
+    if ((dir = opendir(resolved_path)) != NULL)
+    {
+        mdebug1("Scanning directory: '%s' for dynamic rules", rule_dir);
         while ((ent = readdir(dir)) != NULL)
         {
             // check for .json extension
@@ -218,13 +236,37 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
 
             // build full path
             char path[PATH_MAX];
-            snprintf(path, sizeof(path), "%s/%s", rule_dir, ent->d_name);
+            // check if the file is a symlink
+            // resolve if necessary
+            // if (stat(ent->d_name, &st) == -1)
+            // {
+            //     merror("Failed to stat file: %s\n", ent->d_name);
+            //     continue;
+            // }
+            // if (S_ISLNK(st.st_mode))
+            // {
+            //     char link_target[PATH_MAX];
+            //     ssize_t len = readlink(ent->d_name, link_target, sizeof(link_target) - 1);
+            //     if (len == -1)
+            //     {
+            //         merror("Failed to read symlink: %s\n", ent->d_name);
+            //         continue;
+            //     }
+            //     link_target[len] = '\0';
+            //     snprintf(path, sizeof(path), "%s/%s", resolved_path, link_target);
+            // }
+            // else
+            // {
+            //     snprintf(path, sizeof(path), "%s/%s", rule_dir, ent->d_name);
+            // }
+            snprintf(path, PATH_MAX - 1, "%s/%s", resolved_path, ent->d_name);
 
             // open and read file
-            mdebug1("Reading rule file: %s\n", path);
+            mdebug1("Reading rule file: '%s'\n", path);
             FILE* fp = fopen(path, "r");
             if (!fp)
             {
+                minfo("Failed to open file: %s\n", path);
                 continue;
             }
 
@@ -232,7 +274,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
             long len = ftell(fp);
             if (len < 0)
             {
-                merror("Failed to get file size: %s\n", path);
+                mwarn("Failed to get file size: %s\n", path);
                 fclose(fp);
                 continue;
             }
@@ -242,7 +284,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
             unsigned long retval = fread(json_data, 1, len, fp);
             if (retval != (unsigned)len)
             {
-                merror("Failed to read file: %s\n", path);
+                mwarn("Failed to read file: %s\n", path);
                 free(json_data);
                 fclose(fp);
                 continue;
@@ -251,7 +293,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
             fclose(fp);
 
             // Parse and store rule
-            detect_rule_t* rule = parse_rule(json_data);
+            detect_rule_t* rule = parse_rule(json_data, len);
             free(json_data);
 
             if (rule)
@@ -271,7 +313,7 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
         return count;
     }
     merror("Failed to open directory: %s\n", rule_dir);
-    free(rules);
+    free(*rules);
     rules = NULL;
     return -1;
 }

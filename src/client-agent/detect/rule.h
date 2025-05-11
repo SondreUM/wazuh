@@ -2,7 +2,6 @@
 #define RULE_H
 
 #include "shared.h"
-#include <cjson/cJSON.h>
 #include <stdint.h>
 #include <time.h>
 
@@ -76,7 +75,7 @@ typedef struct detect_rule
  * @param json_string The JSON string to parse
  * @return detect_rule_t* The parsed rule or NULL on failure
  */
-detect_rule_t* parse_rule(const char* json_string);
+detect_rule_t* parse_rule(const char* json_string, size_t max_len);
 
 /**
  * @brief Parse detection rules from a directory

@@ -1,6 +1,7 @@
 #include "detect.h"
 #include "agentd.h"
-#include <cjson/cJSON.h>
+#include "external/cJSON/cJSON.h"
+#include "shared.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,7 +43,7 @@ static pthread_mutex_t log_mutex;
 // mutex for the detection state
 static pthread_mutex_t state_mutex;
 // rules array
-static detect_rule_t* rules[DETECT_RULE_MAX] = {NULL}; // Array of rules
+static detect_rule_t* rules[DETECT_RULE_MAX + 1] = {NULL}; // Array of rules
 
 void detect_init(const char* rule_dir)
 {
@@ -53,7 +54,7 @@ void detect_init(const char* rule_dir)
     }
 
     // Initialize rules array
-    for (int i = 0; i < DETECT_RULE_MAX; i++)
+    for (int i = 0; i < DETECT_RULE_MAX + 1; i++)
     {
         rules[i] = NULL;
     }
@@ -86,8 +87,6 @@ void detect_init(const char* rule_dir)
     }
     detect_state.state = STATUS_NORMAL;
     detect_state.last_detection = 0;
-
-    // rules = parse_rule();
 }
 
 detect_state_t detect_get_state()

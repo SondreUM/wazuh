@@ -4,7 +4,7 @@
 #include "detect/rule.h"
 #include "shared.h"
 
-#define FILTER_RULE_DIRECTORY "/var/ossec/etc/filter/"
+#define FILTER_RULE_DIRECTORY "/var/ossec/etc/filter"
 #define FILTER_RULE_MAX       100
 
 /**

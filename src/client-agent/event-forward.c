@@ -32,9 +32,9 @@ void* EventForward()
     {
         msg[recv_b] = '\0';
 #ifdef DYNAMIC_DETECT
-        if (recv_b > 0 && msg)
+        if (recv_b > 0)
         {
-            mdebug2("Received message: %s", msg);
+            // mdebug2("Received message: %s", msg);
             // send message to detectmon
             detect_buffer_push(msg, recv_b);
 

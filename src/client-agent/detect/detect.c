@@ -127,6 +127,7 @@ void dispatch_hre(hre_t* hre)
     // event window duration in seconds
     // time_t window_size = hre->rule->before + hre->rule->after;
 
+    mdebug1("Dispatched HRE: %ld, rule: %s", hre->timestamp, hre->rule->name);
     // find the starting timestamp of the event window
     log_buffer_t* log_start = NULL;
     int idx = log_find_timestamp(window_start);
@@ -162,8 +163,30 @@ void dispatch_hre(hre_t* hre)
     // buffer operation is done, unlock the mutex
     pthread_mutex_unlock(&log_mutex);
 
-    // format the message for sending
+    // format the event contents
     char* hre_json = format_hre_2json(hre, context);
+
+    /* format standard OSSEC event
+     * https://documentation.wazuh.com/4.10/development/message-format.html#standard-ossec-event
+     * Format:
+     * <Queue>:<Location>:<Message>
+     */
+
+    // prepend the queue and location
+    char prefix[32 + sizeof(DETECT_SOURCE_NAME)];
+    snprintf(prefix, sizeof(prefix), "%d:%s:", DETECT_WAZUH_ID, DETECT_SOURCE_NAME);
+    char* ret = (char*)realloc(hre_json, strlen(hre_json) + strlen(prefix) + 1);
+    if (ret == NULL)
+    {
+        merror("Failed to allocate memory for the HRE message.");
+        free(hre_json);
+        return;
+    }
+    hre_json = ret;
+    // shift the json body to the right
+    memmove(hre_json + strlen(prefix), hre_json, strlen(hre_json) + 1);
+    // prepend the prefix
+    memcpy(hre_json, prefix, strlen(prefix));
 
     // queue the event for sending
     w_agentd_state_update(INCREMENT_MSG_COUNT, NULL);
@@ -230,11 +253,23 @@ detect_rule_t* scan_log(const char* entry, size_t len)
 
 int detect_buffer_push(const char* entry, size_t size)
 {
-    if (entry == NULL || size <= 0)
+    if (entry == NULL)
     {
         merror("Invalid arguments to detect_buffer_push: size: %ld", size);
         return -1;
     }
+    // if size is not provided, use the length of the string
+    else if (size <= 0)
+    {
+        // best effort to determine the size of the entry
+        size = strlen(entry);
+        if (size <= 0)
+        {
+            merror("Invalid size for the log entry: %ld", size);
+            return -1;
+        }
+    }
+
     pthread_mutex_lock(&log_mutex);
     time_t now = time(NULL);
     log_buffer_t* current = &log_buffer[log_buffer_idx];
@@ -245,13 +280,15 @@ int detect_buffer_push(const char* entry, size_t size)
         // check if the buffer will overflow, reallocate if needed
         if (current->cursor + size > current->size)
         {
-            current->buffer = realloc(current->buffer, current->size + size + 1);
+            os_realloc(current->buffer, current->size + size + 1, current->buffer);
+            current->size += size + 1;
         }
     }
     // timestamp do not exist, create a new log buffer
     else
     {
         // increment the log buffer index
+        // overwriting the oldest buffer
         log_buffer_idx = (log_buffer_idx + 1) % MAX_LOG_DURATION;
         current = &log_buffer[log_buffer_idx];
 
@@ -260,18 +297,13 @@ int detect_buffer_push(const char* entry, size_t size)
         {
             free(current->buffer);
             current->buffer = NULL;
+            current->size = 0;
         }
 
         // check if buffer exists, allocate if needed
         if (current->buffer == NULL)
         {
-            current->buffer = malloc(MAX(INITIAL_LOG_BUFFER_SIZE, size));
-            if (current->buffer == NULL)
-            {
-                merror("Failed to allocate memory for the log buffer.");
-                pthread_mutex_unlock(&log_mutex);
-                return -1;
-            }
+            os_malloc(MAX(INITIAL_LOG_BUFFER_SIZE, size), current->buffer);
             current->size = MAX(INITIAL_LOG_BUFFER_SIZE, size);
         }
         // reset metadata
@@ -289,7 +321,7 @@ int detect_buffer_push(const char* entry, size_t size)
         return -1;
     }
     // append the entry to the buffer
-    memcpy(current->buffer + current->cursor, entry, size);
+    memcpy(&current->buffer[current->cursor], entry, size);
     // ensure that the entry is null terminated
     if (entry[size] != '\0')
     {
@@ -297,7 +329,7 @@ int detect_buffer_push(const char* entry, size_t size)
         size++;
     }
     // update the cursor
-    current->cursor += size + sizeof(size_t);
+    current->cursor += size;
 
     pthread_mutex_unlock(&log_mutex);
     return 0;
@@ -367,37 +399,50 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
     int detections = 0;
     size_t read_cursor = 0;
 
+    mdebug1("Scanning log buffer %ld, contains %ld bytes, total size %ld",
+            log_buffer->timestamp,
+            log_buffer->cursor,
+            log_buffer->size);
     // read each log entry in the buffer
-    for (size_t entry_len = 0; read_cursor <= log_buffer->cursor;)
+    for (size_t entry_len = 0; read_cursor < log_buffer->cursor;)
     {
         // search for the next zero byte
         entry_len = strnlen(&log_buffer->buffer[read_cursor], log_buffer->cursor - read_cursor);
 
+        // sanity check for entry length
+        if (entry_len <= 0 || entry_len > log_buffer->cursor - read_cursor)
+        {
+            merror("Invalid entry length when scanning the log buffer: %ld", entry_len);
+            break;
+        }
+
         // apply rules to the log entry
+        // mdebug2("Scanning log entry: %s", &log_buffer->buffer[read_cursor]);
         detect_rule_t* rule = scan_log(&log_buffer->buffer[read_cursor], entry_len);
         if (rule != NULL)
         {
             // create a new HRE
-            hre_t* new_hre = malloc(sizeof(hre_t));
-            if (new_hre == NULL)
-            {
-                merror("Failed to allocate memory for the HRE.");
-                return -1;
-            }
+            hre_t* new_hre;
+            os_malloc(sizeof(hre_t), new_hre);
+
             new_hre->rule = rule;
             new_hre->timestamp = log_buffer->timestamp;
-            new_hre->event_trigger = strndup(&log_buffer->buffer[read_cursor], entry_len);
-            if (new_hre->event_trigger == NULL)
-            {
-                merror("Failed to allocate memory for the event trigger.");
-                free(new_hre);
-                return -1;
-            }
+            os_strdup(&log_buffer->buffer[read_cursor], new_hre->event_trigger);
+
             insert_hre(new_hre);
             detections++;
         }
         // move the read cursor to the next log entry
         read_cursor += entry_len + 1;
+        // skip zero bytes
+        for (; read_cursor < log_buffer->cursor; read_cursor++)
+        {
+            if (log_buffer->buffer[read_cursor] != '\0')
+            {
+                break;
+            }
+        }
+        mdebug1("Read cursor: %ld, entry length: %ld", read_cursor, entry_len);
         // check if the read cursor is out of bounds
         if (read_cursor >= log_buffer->cursor)
         {
@@ -410,6 +455,7 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
 void* w_detectmon_thread(__attribute__((unused)) void* arg)
 {
     mdebug1("Detect thread starting...");
+
     while (1)
     {
         // scan the log buffer for new events
@@ -427,15 +473,26 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
                     log_buffer[log_detect_idx].timestamp,
                     log_buffer[log_detect_idx].cursor);
             detections = scan_log_buffer(&log_buffer[log_detect_idx]);
-            mdebug1("BUFFER: %s", log_buffer[log_detect_idx].buffer);
             mdebug1(
                 "Scanned buffer for timestamp %ld, found %d HRE(s)", log_buffer[log_detect_idx].timestamp, detections);
         }
 
         // update the agent state
         hre_update();
-        if (num_hre() == 0)
+        if (num_hre() == 0 && detect_get_state() != STATUS_NORMAL)
+        {
+            // all hre finished, change state to normal
+            pthread_mutex_lock(&state_mutex);
             detect_state.state = STATUS_NORMAL;
+            pthread_mutex_unlock(&state_mutex);
+            minfo("Resuming normal operation.");
+        }
+        else if (detect_get_state() == STATUS_HRE)
+        {
+            // Currently in HRE state
+            minfo("HRE(s) detected, waiting for event window to close for %d HRE(s).", num_hre());
+        }
+
         sleep(1);
     }
 }

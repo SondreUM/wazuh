@@ -17,6 +17,8 @@
 // Each rule should be in a separate file, using the .json extension
 #define DETECT_RULE_DIRECTORY "/var/ossec/etc/detect"
 #define MAX_CONTEXT_SIZE      OS_MAXSTR
+#define DETECT_SOURCE_NAME    "detectmon"
+#define DETECT_WAZUH_ID       1
 // size of the initial log buffer for each timestamp
 #define INITIAL_LOG_BUFFER_SIZE OS_BUFFER_SIZE
 
@@ -111,6 +113,14 @@ detect_rule_t* scan_log(const char* entry, size_t len);
  * @return int 0 on success, -1 on failure.
  */
 int detect_buffer_push(const char* entry, size_t size);
+
+/**
+ * @brief Formats a detect_rule_t struct into a JSON object
+ *
+ * @param rule pointer to detect_rule_t struct to format
+ * @return cJSON* JSON object containing the formatted rule
+ */
+cJSON* format_rule2json(detect_rule_t* rule);
 
 /**
  * @brief Formats a log buffer into a JSON array

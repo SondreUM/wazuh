@@ -1,7 +1,6 @@
 #include "rule.h"
 #include "external/cJSON/cJSON.h"
 #include "shared.h"
-#include <assert.h>
 #include <dirent.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -211,11 +210,6 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
     struct dirent* ent;
     int count = 0;
 
-    for (int i = 0; i < (int)max_rules; i++)
-    {
-        rules[i] = NULL;
-    }
-
     // resolve directory path in case of symlinks
     char resolved_path[PATH_MAX];
     if (realpath(rule_dir, resolved_path) == NULL)
@@ -236,33 +230,10 @@ int parse_rules(const char* rule_dir, detect_rule_t** rules, size_t max_rules)
 
             // build full path
             char path[PATH_MAX];
-            // check if the file is a symlink
-            // resolve if necessary
-            // if (stat(ent->d_name, &st) == -1)
-            // {
-            //     merror("Failed to stat file: %s\n", ent->d_name);
-            //     continue;
-            // }
-            // if (S_ISLNK(st.st_mode))
-            // {
-            //     char link_target[PATH_MAX];
-            //     ssize_t len = readlink(ent->d_name, link_target, sizeof(link_target) - 1);
-            //     if (len == -1)
-            //     {
-            //         merror("Failed to read symlink: %s\n", ent->d_name);
-            //         continue;
-            //     }
-            //     link_target[len] = '\0';
-            //     snprintf(path, sizeof(path), "%s/%s", resolved_path, link_target);
-            // }
-            // else
-            // {
-            //     snprintf(path, sizeof(path), "%s/%s", rule_dir, ent->d_name);
-            // }
             snprintf(path, PATH_MAX - 1, "%s/%s", resolved_path, ent->d_name);
 
             // open and read file
-            mdebug1("Reading rule file: '%s'\n", path);
+            mdebug1("Reading rule file: '%s'", path);
             FILE* fp = fopen(path, "r");
             if (!fp)
             {

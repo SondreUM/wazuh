@@ -10,7 +10,7 @@
 #include <string.h>
 
 // array containing filter rules
-static detect_rule_t* rules[FILTER_RULE_MAX + 1];
+static detect_rule_t* rules[FILTER_RULE_MAX + 1] = {NULL}; // Array of rules
 
 void filter_init(const char* rule_dir)
 {

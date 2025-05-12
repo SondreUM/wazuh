@@ -25,6 +25,7 @@ void testable_detectmon_thread()
 static inline int log_find_timestamp(time_t timestamp);
 static inline int oldest_hre();
 static inline int num_hre();
+static inline void reset_idx_counters();
 
 /* agent detection state */
 agent_detect_state_t detect_state = {.state = STATUS_NORMAL, .hre = NULL, .last_detection = 0};
@@ -33,9 +34,9 @@ agent_detect_state_t detect_state = {.state = STATUS_NORMAL, .hre = NULL, .last_
 // rotating log event buffer
 log_buffer_t log_buffer[MAX_LOG_DURATION];
 // index of the active log buffer
-static int log_buffer_idx = 0;
+static uint64_t log_buffer_idx = 0;
 // index of the detecion agent
-static int log_detect_idx = 0;
+static uint64_t log_detect_idx = 0;
 // mutex for the log buffer
 static pthread_mutex_t log_mutex;
 
@@ -87,6 +88,8 @@ void detect_init(const char* rule_dir)
     }
     detect_state.state = STATUS_NORMAL;
     detect_state.last_detection = 0;
+
+    minfo("Detectmon thread version %s starting...", DETECT_VERSION);
 }
 
 detect_state_t detect_get_state()
@@ -127,7 +130,7 @@ void dispatch_hre(hre_t* hre)
     // event window duration in seconds
     // time_t window_size = hre->rule->before + hre->rule->after;
 
-    mdebug1("Dispatched HRE: %ld, rule: %s", hre->timestamp, hre->rule->name);
+    mdebug1("Dispatching HRE: %ld, rule: %s", hre->timestamp, hre->rule->name);
     // find the starting timestamp of the event window
     log_buffer_t* log_start = NULL;
     int idx = log_find_timestamp(window_start);
@@ -172,31 +175,27 @@ void dispatch_hre(hre_t* hre)
      * <Queue>:<Location>:<Message>
      */
 
-    // prepend the queue and location
+    // construct the prefix
     char prefix[32 + sizeof(DETECT_SOURCE_NAME)];
     snprintf(prefix, sizeof(prefix), "%d:%s:", DETECT_WAZUH_ID, DETECT_SOURCE_NAME);
-    char* ret = (char*)realloc(hre_json, strlen(hre_json) + strlen(prefix) + 1);
-    if (ret == NULL)
-    {
-        merror("Failed to allocate memory for the HRE message.");
-        free(hre_json);
-        return;
-    }
+    size_t prefix_len = strlen(prefix);
+
+    char* ret = NULL;
+    os_realloc(hre_json, strlen(hre_json) + prefix_len + 1, ret);
+    // most likely the realloc returns the same pointer
     hre_json = ret;
+
     // shift the json body to the right
-    memmove(hre_json + strlen(prefix), hre_json, strlen(hre_json) + 1);
+    memmove(hre_json + prefix_len, hre_json, strlen(hre_json) + 1);
     // prepend the prefix
-    memcpy(hre_json, prefix, strlen(prefix));
+    memcpy(hre_json, prefix, prefix_len);
 
     // queue the event for sending
     w_agentd_state_update(INCREMENT_MSG_COUNT, NULL);
     if (send_msg(hre_json, -1) < 0)
-    {
         merror("Failed to send the HRE message.");
-        free(hre_json);
-        return;
-    }
-    mdebug1("Dispatched HRE: %s", hre_json);
+    else
+        mdebug1("Dispatched HRE: %s", hre_json);
 
     // free the event message
     free(hre_json);
@@ -251,37 +250,37 @@ detect_rule_t* scan_log(const char* entry, size_t len)
     return NULL;
 }
 
-int detect_buffer_push(const char* entry, size_t size)
+int detect_buffer_push(const char* entry, size_t entry_len)
 {
     if (entry == NULL)
     {
-        merror("Invalid arguments to detect_buffer_push: size: %ld", size);
+        merror("Invalid arguments to detect_buffer_push: size: %ld", entry_len);
         return -1;
     }
     // if size is not provided, use the length of the string
-    else if (size <= 0)
+    else if (entry_len <= 0)
     {
         // best effort to determine the size of the entry
-        size = strlen(entry);
-        if (size <= 0)
+        entry_len = w_strlen(entry);
+        if (entry_len <= 0)
         {
-            merror("Invalid size for the log entry: %ld", size);
+            merror("Invalid size for the log entry: %ld", entry_len);
             return -1;
         }
     }
 
     pthread_mutex_lock(&log_mutex);
     time_t now = time(NULL);
-    log_buffer_t* current = &log_buffer[log_buffer_idx];
+    log_buffer_t* current = &log_buffer[log_buffer_idx % MAX_LOG_DURATION];
 
     // check if the current idx timestamp matches
     if (current->timestamp == now)
     {
         // check if the buffer will overflow, reallocate if needed
-        if (current->cursor + size > current->size)
+        if (current->cursor + entry_len > current->size)
         {
-            os_realloc(current->buffer, current->size + size + 1, current->buffer);
-            current->size += size + 1;
+            current->size += MAX(entry_len + 1, INITIAL_LOG_BUFFER_SIZE);
+            os_realloc(current->buffer, current->size, current->buffer);
         }
     }
     // timestamp do not exist, create a new log buffer
@@ -289,13 +288,16 @@ int detect_buffer_push(const char* entry, size_t size)
     {
         // increment the log buffer index
         // overwriting the oldest buffer
-        log_buffer_idx = (log_buffer_idx + 1) % MAX_LOG_DURATION;
-        current = &log_buffer[log_buffer_idx];
+        log_buffer_idx++;
+        if (log_buffer_idx >= UINT64_MAX - 1)
+            reset_idx_counters();
+        // log_buffer_idx = (log_buffer_idx + 1) % MAX_LOG_DURATION;
+        current = &log_buffer[log_buffer_idx % MAX_LOG_DURATION];
 
         // if the existing buffer is larger than default size, free it
         if (current->buffer != NULL && current->size > INITIAL_LOG_BUFFER_SIZE)
         {
-            free(current->buffer);
+            os_free(current->buffer);
             current->buffer = NULL;
             current->size = 0;
         }
@@ -303,8 +305,8 @@ int detect_buffer_push(const char* entry, size_t size)
         // check if buffer exists, allocate if needed
         if (current->buffer == NULL)
         {
-            os_malloc(MAX(INITIAL_LOG_BUFFER_SIZE, size), current->buffer);
-            current->size = MAX(INITIAL_LOG_BUFFER_SIZE, size);
+            current->size = MAX(INITIAL_LOG_BUFFER_SIZE, entry_len + 1);
+            os_malloc(current->size, current->buffer);
         }
         // reset metadata
         current->timestamp = now;
@@ -321,15 +323,15 @@ int detect_buffer_push(const char* entry, size_t size)
         return -1;
     }
     // append the entry to the buffer
-    memcpy(&current->buffer[current->cursor], entry, size);
+    strncpy(&current->buffer[current->cursor], entry, entry_len);
     // ensure that the entry is null terminated
-    if (entry[size] != '\0')
+    if (entry[entry_len] != '\0')
     {
-        current->buffer[current->cursor + size] = '\0';
-        size++;
+        current->buffer[current->cursor + entry_len] = '\0';
+        entry_len++;
     }
     // update the cursor
-    current->cursor += size;
+    current->cursor += entry_len;
 
     pthread_mutex_unlock(&log_mutex);
     return 0;
@@ -442,7 +444,7 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
                 break;
             }
         }
-        mdebug1("Read cursor: %ld, entry length: %ld", read_cursor, entry_len);
+        mdebug2("Read cursor: %ld, entry length: %ld", read_cursor, entry_len);
         // check if the read cursor is out of bounds
         if (read_cursor >= log_buffer->cursor)
         {
@@ -459,26 +461,22 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
     while (1)
     {
         // scan the log buffer for new events
-        for (int detections = 0; log_detect_idx < log_buffer_idx;
-             log_detect_idx = (log_detect_idx + 1) % MAX_LOG_DURATION)
+        for (int detections = 0; log_detect_idx < log_buffer_idx; log_detect_idx++)
         {
             // check if the log buffer is empty
-            if (log_buffer[log_detect_idx].cursor == 0 || log_buffer[log_detect_idx].buffer == NULL)
+            log_buffer_t* iter = &log_buffer[log_detect_idx % MAX_LOG_DURATION];
+            if (iter->cursor == 0 || iter->buffer == NULL)
             {
-                mdebug1("Log buffer %d is empty, skipping.", log_detect_idx);
+                mdebug1("Log buffer %ld is empty, skipping.", log_detect_idx);
                 continue;
             }
             // scan the log buffer for events
-            mdebug1("Scanning log buffer %ld, contains %ld bytes",
-                    log_buffer[log_detect_idx].timestamp,
-                    log_buffer[log_detect_idx].cursor);
-            detections = scan_log_buffer(&log_buffer[log_detect_idx]);
-            mdebug1(
-                "Scanned buffer for timestamp %ld, found %d HRE(s)", log_buffer[log_detect_idx].timestamp, detections);
+            mdebug1("Scanning log buffer %ld, contains %ld bytes", iter->timestamp, iter->cursor);
+            detections = scan_log_buffer(iter);
+            mdebug1("Scanned buffer for timestamp %ld, found %d HRE(s)", iter->timestamp, detections);
         }
 
         // update the agent state
-        hre_update();
         if (num_hre() == 0 && detect_get_state() != STATUS_NORMAL)
         {
             // all hre finished, change state to normal
@@ -490,6 +488,7 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
         else if (detect_get_state() == STATUS_HRE)
         {
             // Currently in HRE state
+            hre_update();
             minfo("HRE(s) detected, waiting for event window to close for %d HRE(s).", num_hre());
         }
 
@@ -559,4 +558,25 @@ static inline int oldest_hre()
         }
     }
     return oldest;
+}
+
+/**
+ * @brief resets the index counters for the log buffer and detection agent.
+ * The current position in the log buffer is maintained.
+ */
+static inline void reset_idx_counters()
+{
+    if (log_buffer_idx - log_detect_idx < MAX_LOG_DURATION)
+    {
+        log_buffer_idx = (log_buffer_idx % MAX_LOG_DURATION);
+        log_detect_idx = (log_buffer_idx % MAX_LOG_DURATION);
+    }
+    else
+    {
+        // distance between the two indexes is larger than the buffer size
+        // maintain distance between the two indexes
+        uint64_t distance = log_buffer_idx - log_detect_idx;
+        log_detect_idx %= MAX_LOG_DURATION;
+        log_buffer_idx = (log_detect_idx % MAX_LOG_DURATION) + distance;
+    }
 }

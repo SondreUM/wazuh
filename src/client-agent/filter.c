@@ -64,6 +64,10 @@ void filter_free(detect_rule_t** rule)
 int filter_log_check(const char* message, size_t length)
 {
 
+    // check if the rules are loaded
+    if (rules[0] == NULL)
+        return 0;
+
     if (message == NULL || length <= 0)
     {
         merror("Invalid arguments");
@@ -76,7 +80,7 @@ int filter_log_check(const char* message, size_t length)
         if (apply_rule(rule, message, length) == 1)
         {
             mdebug1("Filter rule matched: %s, dropping log entry %s\n", rule->name, message);
-            return rule->id; // Rule matched
+            return (int)rule->id; // Rule matched
         }
     }
 

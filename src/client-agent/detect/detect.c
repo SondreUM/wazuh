@@ -91,7 +91,7 @@ void detect_init(const char* rule_dir)
     detect_state.state = STATUS_NORMAL;
     detect_state.last_detection = 0;
 
-    minfo("Detectmon thread version %s starting...", DETECT_VERSION);
+    minfo("Detectmon thread version %s initialised...", DETECT_VERSION);
 }
 
 detect_state_t detect_get_state()
@@ -358,7 +358,7 @@ int detect_buffer_push(const char* entry, size_t entry_len)
 
     // append the entry to the buffer
     entry_len = MIN(entry_len, OS_MAXSTR - current->cursor - 1);
-    mdebug1("Writing %ld bytes to buffer %ld, cursor: %ld, total_size: %ld",
+    mdebug2("Writing %ld bytes to buffer %ld, cursor: %ld, total_size: %ld",
             entry_len,
             current->timestamp,
             current->cursor,
@@ -389,7 +389,7 @@ detect_state_t insert_hre(hre_t* new_hre)
     {
         mdebug1("Inserting new HRE for: %s", new_hre->event_trigger);
         // if the HRE array is full, dispatch the oldest HRE
-        if (num_hre() <= MAX_HRE)
+        if (num_hre() >= MAX_HRE)
         {
             int oldest = oldest_hre();
             // fallback to random if for some reason the oldest is not found
@@ -461,7 +461,6 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
         }
 
         // apply rules to the log entry
-        // mdebug2("Scanning log entry: %s", &log_buffer->buffer[read_cursor]);
         detect_rule_t* rule = scan_log(&log_buffer->buffer[read_cursor], entry_len);
         if (rule != NULL)
         {
@@ -522,9 +521,7 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
         if (detect_get_state() == STATUS_HRE)
         {
             // Currently in HRE state
-            pthread_mutex_lock(&state_mutex);
             hre_update();
-            pthread_mutex_unlock(&state_mutex);
             minfo("%d HRE(s) detected, waiting for event window to close.", num_hre());
         }
 

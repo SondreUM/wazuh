@@ -12,11 +12,15 @@
 #include "os_net/os_net.h"
 #include "sec.h"
 #include "shared.h"
+#include <sys/types.h>
 
 #ifdef DYNAMIC_DETECT
 #include "detect/detect.h"
 #include "filter.h"
 #endif
+
+static u_int64_t b_sent = 0;     /* Number of B sent */
+static u_int64_t b_filtered = 0; /* Number of B filtered */
 
 /* Receive a message locally on the agent and forward it to the manager */
 void* EventForward()
@@ -41,8 +45,12 @@ void* EventForward()
             // check if the message should be discarded
             if (filter_log_check(msg, recv_b) > 0)
             {
+                b_filtered += recv_b;
+                mdebug2("Filtered message: %s", msg);
+                minfo("Filtered %ld B, sent %ld B", b_filtered, b_sent);
                 continue;
             }
+            b_sent += recv_b / 1024;
         }
 #endif
         if (agt->buffer)

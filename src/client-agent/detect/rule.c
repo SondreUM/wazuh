@@ -153,8 +153,6 @@ detect_rule_t* parse_rule(const char* json_string, size_t max_len)
             condition->matcher = condition_matcher(tmp->string, strlen(tmp->string));
             condition->pattern = strdup(tmp->valuestring);
             rule->conditions[cond_idx++] = condition;
-
-            cond_idx++;
         }
         // NULL terminate the conditions array
         rule->conditions[cond_idx] = NULL;

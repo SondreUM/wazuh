@@ -288,18 +288,22 @@ int detect_buffer_push(const char* entry, size_t entry_len)
         // create a new log buffer
         current = &log_buffer[++log_buffer_idx % MAX_LOG_DURATION];
         current->timestamp = 0;
+        current->cursor = 0;
     }
-
-    // prevent buffer overflow by limiting the size of the entry
-    size_t cpy_len = MIN(entry_len, OS_MAXSTR - current->cursor - 1);
 
     // check if the current idx timestamp matches
     if (current->timestamp == now)
     {
         // check if the buffer will overflow, reallocate if needed
-        if (current->cursor + cpy_len > current->size)
+        if (current->cursor + entry_len > current->size)
         {
-            current->size += MAX(cpy_len + 1, INITIAL_LOG_BUFFER_SIZE);
+            mdebug2("Resizing buffer %ld, current size: %ld, new size: %ld, entry size: %ld, cursor: %ld",
+                    current->timestamp,
+                    current->size,
+                    current->size + entry_len + INITIAL_LOG_BUFFER_SIZE - (entry_len % INITIAL_LOG_BUFFER_SIZE),
+                    current->size + entry_len,
+                    current->cursor);
+            current->size += entry_len + INITIAL_LOG_BUFFER_SIZE - (entry_len % INITIAL_LOG_BUFFER_SIZE);
             os_realloc(current->buffer, current->size, current->buffer);
         }
     }
@@ -327,8 +331,15 @@ int detect_buffer_push(const char* entry, size_t entry_len)
         // check if buffer exists, allocate if needed
         if (current->buffer == NULL)
         {
-            current->size = MAX(INITIAL_LOG_BUFFER_SIZE, cpy_len + 1);
+            current->size = entry_len + INITIAL_LOG_BUFFER_SIZE - (entry_len % INITIAL_LOG_BUFFER_SIZE);
             os_malloc(current->size, current->buffer);
+        }
+        else if (current->size < entry_len + 1)
+        {
+            // existing buffer is smaller than the entry size
+            // reallocate the buffer if needed
+            current->size = entry_len + INITIAL_LOG_BUFFER_SIZE - (entry_len % INITIAL_LOG_BUFFER_SIZE);
+            os_realloc(current->buffer, current->size, current->buffer);
         }
         // reset metadata
         current->timestamp = now;
@@ -346,11 +357,24 @@ int detect_buffer_push(const char* entry, size_t entry_len)
     }
 
     // append the entry to the buffer
-    strncpy(&current->buffer[current->cursor], entry, cpy_len);
-    // ensure that the entry is null terminated
-    current->buffer[current->cursor + cpy_len] = '\0';
+    entry_len = MIN(entry_len, OS_MAXSTR - current->cursor - 1);
+    mdebug1("Writing %ld bytes to buffer %ld, cursor: %ld, total_size: %ld",
+            entry_len,
+            current->timestamp,
+            current->cursor,
+            current->size);
+    memcpy(&current->buffer[current->cursor], entry, entry_len);
     // update the cursor
-    current->cursor += cpy_len;
+    current->cursor += entry_len;
+    // null terminate the entry
+    if (current->cursor > current->size)
+    {
+        // buffer full reset the cursor to the end of the buffer
+        current->cursor = current->size;
+        current->buffer[current->cursor - 1] = '\0';
+    }
+    else if (current->buffer[current->cursor - 1] != '\0')
+        current->buffer[current->cursor++] = '\0';
 
     pthread_mutex_unlock(&log_mutex);
     return 0;

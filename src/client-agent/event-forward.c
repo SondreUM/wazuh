@@ -12,6 +12,7 @@
 #include "os_net/os_net.h"
 #include "sec.h"
 #include "shared.h"
+#include <string.h>
 #include <sys/types.h>
 
 #ifdef DYNAMIC_DETECT
@@ -39,11 +40,16 @@ void* EventForward()
         if (recv_b > 0)
         {
             // mdebug2("Received message: %s", msg);
+            // skip ossec queue and locatio prefix, only match the message
+            // <Queue>:<Location>:<Message>
+            // queue is 1 byte skip, and find the next ':'
+            const char* message_loc = strchr(&msg[2], ':') + 1;
+            const char* match_msg = message_loc ? message_loc : msg;
             // send message to detectmon
-            detect_buffer_push(msg, recv_b);
+            detect_buffer_push(msg + 2, recv_b - 2);
 
             // check if the message should be discarded
-            if (filter_log_check(msg, recv_b) > 0)
+            if (filter_log_check(match_msg, strnlen(match_msg, recv_b)) > 0)
             {
                 b_filtered += recv_b;
                 mdebug2("Filtered message: %s", msg);

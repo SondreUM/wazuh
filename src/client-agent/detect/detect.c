@@ -141,20 +141,20 @@ int dispatch_hre(hre_t* hre)
 
     /* find the starting timestamp of the event window */
     uint64_t window_start_idx = log_buffer_idx;
-    for (uint64_t i = log_buffer_idx; i > 0; i--)
+    for (uint64_t i = log_buffer_idx; i >= 0; i--)
     {
         log_buffer_t* current = &log_buffer[i % MAX_LOG_DURATION];
         // skip empty log buffers
         if (current->timestamp == 0)
             continue;
         // check if the log buffer timestamp is within the event window
-        else if (current->timestamp >= window_start_time)
+        else if (window_start_time <= current->timestamp)
             window_start_idx = i;
         // timestamp is before the event window start
         else if (current->timestamp < window_start_time)
             break;
     }
-    mdebug1("Found starting timestamp: %ld, index: %ld", window_start_time, window_start_idx);
+    mdebug2("Found HRE starting timestamp: %ld, index: %ld", window_start_time, window_start_idx);
 
     /* construct the context object */
     cJSON* context = NULL;
@@ -176,16 +176,29 @@ int dispatch_hre(hre_t* hre)
     // buffer operation is done, unlock the mutex
     pthread_mutex_unlock(&log_mutex);
 
-    // format the event contents
-    char* hre_json = format_hre_2json(hre, context);
+    /* safeguard against huge context sizes*/
+    char* hre_json;
+    char* context_str = cJSON_PrintUnformatted(context);
+    size_t context_len = strlen(context_str);
+    if (context_len > MAX_CONTEXT_SIZE)
+    {
+        context_str[context_len - 1] = '\0';
+        cJSON_Delete(context);
+        hre->context = context_str;
+        hre_json = format_hre_2json(hre, NULL);
+        os_free(context_str);
+    }
+    else
+        // format the event contents
+        hre_json = format_hre_2json(hre, context);
 
-    /* format standard OSSEC event
+    /* OSSEC standard event format
      * https://documentation.wazuh.com/4.10/development/message-format.html#standard-ossec-event
      * Format:
      * <Queue>:<Location>:<Message>
      */
 
-    // construct the prefix
+    // construct the ossec format prefix
     char prefix[32 + sizeof(DETECT_SOURCE_NAME)];
     snprintf(prefix, sizeof(prefix), "%d:%s:", DETECT_WAZUH_ID, DETECT_SOURCE_NAME);
     size_t prefix_len = strlen(prefix);
@@ -205,7 +218,7 @@ int dispatch_hre(hre_t* hre)
     if (send_msg(hre_json, -1) < 0)
         merror("Failed to send the HRE message.");
     else
-        mdebug1("Dispatched HRE: %s", hre_json);
+        minfo("Dispatched HRE: %s", hre->rule->name);
 
     // free the event message
     free(hre_json);

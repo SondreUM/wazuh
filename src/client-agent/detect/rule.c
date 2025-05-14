@@ -97,7 +97,7 @@ detect_rule_t* parse_rule(const char* json_string, size_t max_len)
     }
 
     /* Description field, optional */
-    if (cJSON_HasObjectItem(root, "description") == 0)
+    if (cJSON_HasObjectItem(root, "description") == 1)
     {
         cJSON* desc = cJSON_GetObjectItem(root, "description");
         rule->description = strdup(desc->valuestring);

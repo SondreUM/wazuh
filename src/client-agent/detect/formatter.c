@@ -19,9 +19,9 @@ inline static const char* matcher_to_string(match_rule_t matcher)
     }
 }
 
-cJSON* format_buffer2json(cJSON* array, log_buffer_t* buffer)
+cJSON* format_buffer2json(cJSON* array, log_buffer_t* log_buffer)
 {
-    if (!buffer || buffer->cursor == 0)
+    if (!log_buffer || log_buffer->cursor == 0)
         return NULL;
 
     if (array == NULL)
@@ -34,28 +34,20 @@ cJSON* format_buffer2json(cJSON* array, log_buffer_t* buffer)
         }
     }
 
-    size_t cursor_buffer = 0;
-    for (size_t entry_len = 0; cursor_buffer < buffer->cursor; cursor_buffer += entry_len)
+    size_t entry_len = 0;
+    for (size_t read_cursor = 0; read_cursor < log_buffer->cursor;)
     {
+        char* entry = &log_buffer->buffer[read_cursor];
+
         // Find the entry size
-        entry_len = strnlen(buffer->buffer + cursor_buffer, buffer->cursor - cursor_buffer);
-        if (entry_len == 0)
+        entry_len = strnlen(entry, log_buffer->cursor - read_cursor);
+        if (entry_len <= 0 || entry_len > log_buffer->cursor - read_cursor)
         {
+            merror("Invalid entry length when constructing context, log buffer: %ld", entry_len);
             break;
         }
 
-        // Create a JSON string for the entry
-        char* entry = strndup(buffer->buffer + cursor_buffer, entry_len);
-        if (!entry)
-        {
-            merror("Failed to allocate memory for JSON entry.");
-            cJSON_Delete(array);
-            return NULL;
-        }
-
         cJSON* json_entry = cJSON_CreateString(entry);
-        free(entry);
-
         if (!json_entry)
         {
             merror("Failed to create JSON string.");
@@ -64,7 +56,11 @@ cJSON* format_buffer2json(cJSON* array, log_buffer_t* buffer)
         }
 
         // Add the JSON string to the array
+        m2debug1("Adding log entry to JSON array: %s", entry);
         cJSON_AddItemToArray(array, json_entry);
+
+        // Move the read cursor to the next log entry
+        read_cursor += entry_len + 1;
     }
 
     return array;
@@ -90,7 +86,9 @@ cJSON* format_rule2json(detect_rule_t* rule)
         {
             cJSON* condition_obj = cJSON_CreateObject();
             cJSON_AddStringToObject(condition_obj, "pattern", rule->conditions[i]->pattern);
-            cJSON_AddStringToObject(condition_obj, "matcher", matcher_to_string(rule->conditions[i]->matcher));
+            const char* matcher_str = matcher_to_string(rule->conditions[i]->matcher);
+            cJSON_AddStringToObject(condition_obj, "matcher", matcher_str);
+            free((char*)matcher_str); // Free the string created by matcher_to_string
             cJSON_AddItemToArray(conditions_array, condition_obj);
         }
         cJSON_AddItemToObject(rule_obj, "conditions", conditions_array);
@@ -99,15 +97,12 @@ cJSON* format_rule2json(detect_rule_t* rule)
     // Add extensions
     if (rule->ext)
     {
-        cJSON* extensions_array = cJSON_CreateArray();
+        cJSON* ext_obj = cJSON_CreateObject();
         for (int i = 0; rule->ext[i] != NULL; i++)
         {
-            cJSON* ext_obj = cJSON_CreateObject();
-            cJSON_AddStringToObject(ext_obj, "field", rule->ext[i]->field);
-            cJSON_AddStringToObject(ext_obj, "value", rule->ext[i]->value);
-            cJSON_AddItemToArray(extensions_array, ext_obj);
+            cJSON_AddStringToObject(ext_obj, rule->ext[i]->field, rule->ext[i]->value);
         }
-        cJSON_AddItemToObject(rule_obj, "extensions", extensions_array);
+        cJSON_AddItemToObject(rule_obj, "extensions", ext_obj);
     }
 
     return rule_obj;
@@ -120,8 +115,8 @@ char* format_hre_2json(hre_t* hre, cJSON* context_array)
 
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "timestamp", (double)hre->timestamp);
-    cJSON_AddStringToObject(root, "trigger", hre->event_trigger);
     cJSON_AddItemToObject(root, "rule", format_rule2json(hre->rule));
+    cJSON_AddStringToObject(root, "trigger", hre->event_trigger);
     if (context_array)
     {
         cJSON_AddItemToObject(root, "context", context_array);
@@ -134,6 +129,7 @@ char* format_hre_2json(hre_t* hre, cJSON* context_array)
     {
         cJSON_AddNullToObject(root, "context");
     }
+    cJSON_AddStringToObject(root, "detectmon", DETECT_VERSION);
 
     char* retval = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

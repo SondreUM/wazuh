@@ -75,12 +75,6 @@ int apply_rule(detect_rule_t* rule, const char* message, size_t len)
         return 0;
     }
 
-    // skip ossec queue and locatio prefix, only match the message
-    // <Queue>:<Location>:<Message>
-    // queue is 1 byte skip, and find the next ':'
-    const char* message_loc = strchr(&message[2], ':') + 1;
-    const char* match_msg = message_loc ? message_loc : message;
-
     detect_rule_condition_t* condition_iter = rule->conditions[0];
     for (int i = 0; condition_iter != NULL; i++)
     {
@@ -89,7 +83,7 @@ int apply_rule(detect_rule_t* rule, const char* message, size_t len)
         //         condition_iter->matcher,
         //         condition_iter->pattern,
         //         message);
-        if (matcher(condition_iter, match_msg, len) == 1)
+        if (matcher(condition_iter, message, len) == 1)
         {
             return 1;
         }

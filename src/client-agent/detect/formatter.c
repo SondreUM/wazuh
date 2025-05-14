@@ -43,7 +43,7 @@ cJSON* format_buffer2json(cJSON* array, log_buffer_t* log_buffer)
         entry_len = strnlen(entry, log_buffer->cursor - read_cursor);
         if (entry_len <= 0 || entry_len > log_buffer->cursor - read_cursor)
         {
-            merror("Invalid entry length when constructing context, log buffer: %ld", entry_len);
+            mwarn("Invalid entry length when constructing context, log buffer: %ld", entry_len);
             break;
         }
 
@@ -56,7 +56,6 @@ cJSON* format_buffer2json(cJSON* array, log_buffer_t* log_buffer)
         }
 
         // Add the JSON string to the array
-        m2debug1("Adding log entry to JSON array: %s", entry);
         cJSON_AddItemToArray(array, json_entry);
 
         // Move the read cursor to the next log entry
@@ -76,7 +75,10 @@ cJSON* format_rule2json(detect_rule_t* rule)
     cJSON_AddNumberToObject(rule_obj, "before", (double)rule->before);
     cJSON_AddNumberToObject(rule_obj, "after", (double)rule->after);
     cJSON_AddStringToObject(rule_obj, "name", rule->name);
-    cJSON_AddStringToObject(rule_obj, "description", rule->description);
+    if (rule->description)
+        cJSON_AddStringToObject(rule_obj, "description", rule->description);
+    else
+        cJSON_AddNullToObject(rule_obj, "description");
 
     // Add conditions
     if (rule->conditions)
@@ -102,7 +104,7 @@ cJSON* format_rule2json(detect_rule_t* rule)
         {
             cJSON_AddStringToObject(ext_obj, rule->ext[i]->field, rule->ext[i]->value);
         }
-        cJSON_AddItemToObject(rule_obj, "extensions", ext_obj);
+        cJSON_AddItemToObject(rule_obj, "ext", ext_obj);
     }
 
     return rule_obj;
@@ -114,14 +116,19 @@ char* format_hre_2json(hre_t* hre, cJSON* context_array)
         return strdup("\"N/A\"");
 
     cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "detectmon", DETECT_VERSION);
     cJSON_AddNumberToObject(root, "timestamp", (double)hre->timestamp);
     cJSON_AddItemToObject(root, "rule", format_rule2json(hre->rule));
     cJSON_AddStringToObject(root, "trigger", hre->event_trigger);
+
+    /* add the context but be careful of length */
+    // convert cJSON array into a string
     if (context_array)
     {
         cJSON_AddItemToObject(root, "context", context_array);
     }
-    else if (hre->context)
+    // check if the HRE has a context
+    if (hre->context && strlen(hre->context) > 0)
     {
         cJSON_AddStringToObject(root, "context", hre->context);
     }
@@ -129,7 +136,6 @@ char* format_hre_2json(hre_t* hre, cJSON* context_array)
     {
         cJSON_AddNullToObject(root, "context");
     }
-    cJSON_AddStringToObject(root, "detectmon", DETECT_VERSION);
 
     char* retval = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

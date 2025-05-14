@@ -124,11 +124,19 @@ void delete_hre(hre_t* hre)
     free(hre);
 }
 
-void dispatch_hre(hre_t* hre)
+int dispatch_hre(hre_t* hre)
 {
     pthread_mutex_lock(&log_mutex);
     time_t window_start_time = hre->timestamp - hre->rule->before;
     time_t window_end_time = hre->timestamp + hre->rule->after;
+    // sanity check that window end time has passed
+    if (window_end_time > time(NULL))
+    {
+        merror("Trying to dispatch HRE: %ld, but the event window has not passed yet.", hre->timestamp);
+        pthread_mutex_unlock(&log_mutex);
+        return -1;
+    }
+
     mdebug1("Dispatching HRE: %ld, rule: %s", hre->timestamp, hre->rule->name);
 
     /* find the starting timestamp of the event window */
@@ -146,6 +154,7 @@ void dispatch_hre(hre_t* hre)
         else if (current->timestamp < window_start_time)
             break;
     }
+    mdebug1("Found starting timestamp: %ld, index: %ld", window_start_time, window_start_idx);
 
     /* construct the context object */
     cJSON* context = NULL;
@@ -158,7 +167,7 @@ void dispatch_hre(hre_t* hre)
         if (log_iter->timestamp == 0)
             continue;
         // check if the log buffer is within the event window
-        else if (log_iter->timestamp < window_end_time)
+        else if (0 < log_iter->timestamp <= window_end_time)
             // copy the log to the context
             format_buffer2json(context, log_iter);
         else
@@ -200,6 +209,7 @@ void dispatch_hre(hre_t* hre)
 
     // free the event message
     free(hre_json);
+    return 0;
 }
 
 /**
@@ -408,6 +418,7 @@ detect_state_t insert_hre(hre_t* new_hre)
             {
                 if (detect_state.hre[i] == NULL)
                 {
+                    mdebug2("Inserted new HRE at index %d", i);
                     detect_state.hre[i] = new_hre;
                     break;
                 }
@@ -471,6 +482,7 @@ inline static int scan_log_buffer(log_buffer_t* log_buffer)
             new_hre->rule = rule;
             new_hre->timestamp = log_buffer->timestamp;
             os_strdup(&log_buffer->buffer[read_cursor], new_hre->event_trigger);
+            new_hre->context = NULL;
 
             insert_hre(new_hre);
             detections++;
@@ -509,7 +521,7 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
             log_buffer_t* iter = &log_buffer[log_detect_idx % MAX_LOG_DURATION];
             if (iter->cursor == 0 || iter->buffer == NULL)
             {
-                mdebug1("Log buffer %ld is empty, skipping.", log_detect_idx);
+                mdebug2("Log buffer %ld is empty, skipping.", log_detect_idx);
                 continue;
             }
             // scan the log buffer for events

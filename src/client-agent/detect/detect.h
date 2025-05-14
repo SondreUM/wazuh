@@ -6,7 +6,7 @@
 #include "state.h"
 
 /* detection definitions  */
-#define DETECT_VERSION "0.2.0"
+#define DETECT_VERSION "v0.2.6"
 // Maximum number of HREs to process concurrently
 #define MAX_HRE 20
 // Maximum duration of the log buffer in seconds
@@ -94,7 +94,7 @@ void detect_init(const char* rule_dir);
  *
  * @param hre completed HRE, the structure will be freed by the function
  */
-void dispatch_hre(hre_t* hre);
+int dispatch_hre(hre_t* hre);
 
 /**
  * @brief get the current detection state of the agent.

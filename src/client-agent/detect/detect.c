@@ -24,8 +24,6 @@ void testable_detectmon_thread()
 #endif
 
 /* Util functions */
-static inline int log_find_timestamp(time_t timestamp);
-static inline int oldest_hre();
 static inline int num_hre();
 static inline void reset_idx_counters();
 
@@ -126,7 +124,6 @@ void delete_hre(hre_t* hre)
 
 int dispatch_hre(hre_t* hre)
 {
-    pthread_mutex_lock(&log_mutex);
     time_t window_start_time = hre->timestamp - hre->rule->before;
     time_t window_end_time = hre->timestamp + hre->rule->after;
     // sanity check that window end time has passed
@@ -139,74 +136,69 @@ int dispatch_hre(hre_t* hre)
 
     mdebug1("Dispatching HRE: %ld, rule: %s", hre->timestamp, hre->rule->name);
 
-    /* find the starting timestamp of the event window */
-    uint64_t window_start_idx = log_buffer_idx;
-    for (uint64_t i = log_buffer_idx; i >= 0; i--)
+    if (hre->context == NULL)
     {
-        log_buffer_t* current = &log_buffer[i % MAX_LOG_DURATION];
-        // skip empty log buffers
-        if (current->timestamp == 0)
-            continue;
-        // check if the log buffer timestamp is within the event window
-        else if (window_start_time <= current->timestamp)
-            window_start_idx = i;
-        // timestamp is before the event window start
-        else if (current->timestamp < window_start_time)
-            break;
-    }
-    mdebug2("Found HRE starting timestamp: %ld, index: %ld", window_start_time, window_start_idx);
+        pthread_mutex_lock(&log_mutex);
+        /* find the starting timestamp of the event window */
+        uint64_t window_start_idx = log_buffer_idx;
+        for (int i = (int)log_buffer_idx; i >= 0; i--)
+        {
+            log_buffer_t* current = &log_buffer[i % MAX_LOG_DURATION];
+            // skip empty log buffers
+            if (current->timestamp == 0)
+                continue;
+            // check if the log buffer timestamp is within the event window
+            else if (window_start_time <= current->timestamp)
+                window_start_idx = i;
+            // timestamp is before the event window start
+            else if (current->timestamp < window_start_time)
+                break;
+        }
+        mdebug2("Found HRE starting timestamp: %ld, index: %ld", window_start_time, window_start_idx);
 
-    /* construct the context object */
-    cJSON* context = NULL;
-    log_buffer_t* log_iter = NULL;
-    for (uint64_t i = 0; i < MAX_LOG_DURATION; i++)
-    {
-        log_iter = &log_buffer[(i + window_start_idx) % MAX_LOG_DURATION];
+        /* construct the context object */
+        cJSON* context = cJSON_CreateObject();
+        log_buffer_t* log_iter = NULL;
+        for (uint64_t i = 0; i < MAX_LOG_DURATION; i++)
+        {
+            log_iter = &log_buffer[(i + window_start_idx) % MAX_LOG_DURATION];
 
-        // check if the log buffer is empty
-        if (log_iter->timestamp == 0)
-            continue;
-        // check if the log buffer is within the event window
-        else if (0 < log_iter->timestamp <= window_end_time)
-            // copy the log to the context
-            format_buffer2json(context, log_iter);
-        else
-            break;
+            // check if the log buffer is empty
+            if (log_iter->timestamp == 0)
+                continue;
+            // check if the log buffer is within the event window
+            else if (log_iter->timestamp <= window_end_time)
+                // copy the log to the context
+                format_buffer2json(context, log_iter);
+            else
+                break;
+        }
+        // buffer operations are done, unlock the mutex
+        pthread_mutex_unlock(&log_mutex);
+        hre->context = cJSON_PrintUnformatted(context);
+        cJSON_Delete(context);
     }
-    // buffer operation is done, unlock the mutex
-    pthread_mutex_unlock(&log_mutex);
 
     /* safeguard against huge context sizes*/
     char* hre_json;
-    char* context_str = cJSON_PrintUnformatted(context);
-    size_t context_len = strlen(context_str);
+    size_t context_len = strlen(hre->context);
     if (context_len > MAX_CONTEXT_SIZE)
     {
-        context_str[context_len - 1] = '\0';
-        cJSON_Delete(context);
-        hre->context = context_str;
-        hre_json = format_hre_2json(hre, NULL);
-        os_free(context_str);
+        hre->context[context_len - 1] = '\0';
     }
-    else
-        // format the event contents
-        hre_json = format_hre_2json(hre, context);
+    hre_json = format_hre_2json(hre, NULL);
 
     /* OSSEC standard event format
      * https://documentation.wazuh.com/4.10/development/message-format.html#standard-ossec-event
      * Format:
      * <Queue>:<Location>:<Message>
      */
-
     // construct the ossec format prefix
     char prefix[32 + sizeof(DETECT_SOURCE_NAME)];
     snprintf(prefix, sizeof(prefix), "%d:%s:", DETECT_WAZUH_ID, DETECT_SOURCE_NAME);
     size_t prefix_len = strlen(prefix);
 
-    char* ret = NULL;
-    os_realloc(hre_json, strlen(hre_json) + prefix_len + 1, ret);
-    // most likely the realloc returns the same pointer
-    hre_json = ret;
+    os_realloc(hre_json, strlen(hre_json) + prefix_len + 1, hre_json);
 
     // shift the json body to the right
     memmove(hre_json + prefix_len, hre_json, strlen(hre_json) + 1);
@@ -283,7 +275,7 @@ int detect_buffer_push(const char* entry, size_t entry_len)
     if (rules[0] == NULL)
         return 0;
 
-    if (entry == NULL)
+    else if (entry == NULL)
     {
         merror("Invalid arguments to detect_buffer_push: size: %ld", entry_len);
         return -1;
@@ -310,12 +302,17 @@ int detect_buffer_push(const char* entry, size_t entry_len)
         entry_len = OS_MAXSTR - 1;
         // create a new log buffer
         current = &log_buffer[++log_buffer_idx % MAX_LOG_DURATION];
-        current->timestamp = 0;
+        // resize existing buffer or mallocate a new one
+        os_realloc(current->buffer, OS_MAXSTR, current->buffer);
+        current->size = OS_MAXSTR;
         current->cursor = 0;
+        current->timestamp = now;
+        current->buffer[0] = '\0';
+        current->buffer[current->size - 1] = '\0';
     }
 
     // check if the current idx timestamp matches
-    if (current->timestamp == now)
+    else if (current->timestamp == now)
     {
         // check if the buffer will overflow, reallocate if needed
         if (current->cursor + entry_len > current->size)
@@ -405,24 +402,37 @@ int detect_buffer_push(const char* entry, size_t entry_len)
 
 detect_state_t insert_hre(hre_t* new_hre)
 {
-    pthread_mutex_lock(&state_mutex);
-
     // if a new HRE is provided, add it to the list
     if (new_hre != NULL)
     {
+        pthread_mutex_lock(&state_mutex);
         mdebug1("Inserting new HRE for: %s", new_hre->event_trigger);
-        // if the HRE array is full, dispatch the oldest HRE
+        // if the HRE array is full, log the detection
         if (num_hre() >= MAX_HRE)
         {
-            int oldest = oldest_hre();
-            // fallback to random if for some reason the oldest is not found
-            if (oldest == -1)
+            // format the rule to JSON
+            cJSON* rule_json = format_rule2json(new_hre->rule);
+            if (rule_json == NULL)
             {
-                mwarn("Failed to find the oldest HRE.");
-                oldest = rand() % MAX_HRE;
+                mwarn("Failed to format rule to JSON.");
+                pthread_mutex_unlock(&state_mutex);
+                return detect_state.state;
             }
-            dispatch_hre(detect_state.hre[oldest]);
-            detect_state.hre[oldest] = new_hre;
+            char* rule_str = cJSON_PrintUnformatted(rule_json);
+            cJSON_Delete(rule_json);
+
+            // construct the HRE log message
+            char hre_log[INITIAL_LOG_BUFFER_SIZE];
+            snprintf(hre_log, INITIAL_LOG_BUFFER_SIZE, HRE_MESSAGE, new_hre->timestamp, rule_str);
+            os_free(rule_str);
+
+            // log the detection
+            if (detect_buffer_push(hre_log, 0) < 0)
+                mwarn("Failed to push HRE log to the buffer.");
+            else
+                minfo("HRE buffer full, event pushed to the buffer: %s", new_hre->rule->name);
+
+            delete_hre(new_hre);
         }
         else
         {
@@ -438,9 +448,10 @@ detect_state_t insert_hre(hre_t* new_hre)
             }
         }
         detect_state.state = STATUS_HRE;
+        detect_state.last_detection = new_hre->timestamp;
+        pthread_mutex_unlock(&state_mutex);
     }
 
-    pthread_mutex_unlock(&state_mutex);
     return detect_state.state;
 }
 
@@ -557,26 +568,6 @@ void* w_detectmon_thread(__attribute__((unused)) void* arg)
 /* Util */
 
 /**
- * @brief Finds the index of the log buffer with the given timestamp.
- * note: if the timestamp do not exist, it will find the next closest timestamp
- *
- * @param timestamp Timestamp to search for.
- * @return int Index of the log buffer with the given timestamp, or -1 if not found.
- */
-static inline int log_find_timestamp(time_t timestamp)
-{
-    for (int i = 0; i < MAX_LOG_DURATION; i++)
-    {
-        if (log_buffer[i].timestamp == 0)
-        {
-            continue;
-        }
-        //
-    }
-    return -1;
-}
-
-/**
  * @brief Counts the number of HREs in the array.
  * Type: helper function
  *
@@ -593,32 +584,6 @@ static inline int num_hre()
         }
     }
     return count;
-}
-
-/**
- * @brief Finds the index of the oldest HRE in the array.
- * If a empty (HRE) slot is found, it will return the index of that slot.
- * Type: helper function
- *
- * @return int Index of the oldest HRE, or -1 if not found.
- */
-static inline int oldest_hre()
-{
-    int oldest = -1;
-    time_t oldest_time = 0;
-    for (int i = 0; i < MAX_HRE; i++)
-    {
-        if (detect_state.hre[i] == NULL)
-        {
-            return i;
-        }
-        if (oldest == -1 || detect_state.hre[i]->timestamp < oldest_time)
-        {
-            oldest = i;
-            oldest_time = detect_state.hre[i]->timestamp;
-        }
-    }
-    return oldest;
 }
 
 /**

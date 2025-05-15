@@ -6,9 +6,9 @@
 #include "state.h"
 
 /* detection definitions  */
-#define DETECT_VERSION "v0.3.0"
+#define DETECT_VERSION "v0.4.0"
 // Maximum number of HREs to process concurrently
-#define MAX_HRE 20
+#define MAX_HRE 3
 // Maximum duration of the log buffer in seconds
 #define MAX_LOG_DURATION 60
 // Maximum number of rules to that can be loaded
@@ -38,8 +38,7 @@
 // size of the initial log buffer for each timestamp
 #define INITIAL_LOG_BUFFER_SIZE OS_BUFFER_SIZE
 
-static const char HRE_MESSAGE[] = "HRE detected: rule %s, trigger %s at %ld";
-static const char HRE_JSON_FORMAT[] = R"({"timestamp": %ld, "event_trigger": "%s", "rule": %s, "context": "%s"})";
+static const char HRE_MESSAGE[] = "HRE event detected at %ld by rule %s";
 
 /**
  * @brief Current detection state of the agent.

@@ -110,6 +110,33 @@ cJSON* format_rule2json(detect_rule_t* rule)
     return rule_obj;
 }
 
+cJSON* format_rule2json_short(detect_rule_t* rule)
+{
+    if (!rule)
+        return NULL;
+
+    cJSON* rule_obj = cJSON_CreateObject();
+    cJSON_AddNumberToObject(rule_obj, "id", (double)rule->id);
+    cJSON_AddStringToObject(rule_obj, "name", rule->name);
+    if (rule->description)
+        cJSON_AddStringToObject(rule_obj, "description", rule->description);
+    else
+        cJSON_AddNullToObject(rule_obj, "description");
+
+    // Add extensions
+    if (rule->ext)
+    {
+        cJSON* ext_obj = cJSON_CreateObject();
+        for (int i = 0; rule->ext[i] != NULL; i++)
+        {
+            cJSON_AddStringToObject(ext_obj, rule->ext[i]->field, rule->ext[i]->value);
+        }
+        cJSON_AddItemToObject(rule_obj, "ext", ext_obj);
+    }
+
+    return rule_obj;
+}
+
 char* format_hre_2json(hre_t* hre, cJSON* context_array)
 {
     if (!hre)

@@ -39,10 +39,8 @@ void* EventForward()
 #ifdef DYNAMIC_DETECT
         if (recv_b > 0)
         {
-            // mdebug2("Received message: %s", msg);
-            // skip ossec queue and locatio prefix, only match the message
+            // skip ossec queue and location prefix, only match the message
             // <Queue>:<Location>:<Message>
-            // queue is 1 byte skip, and find the next ':'
             const char* message_loc = strchr(&msg[2], ':') + 1;
             const char* match_msg = message_loc ? message_loc : msg;
             // send message to detectmon
@@ -56,7 +54,7 @@ void* EventForward()
                 minfo("Filtered %ld B, sent %ld B", b_filtered, b_sent);
                 continue;
             }
-            b_sent += recv_b / 1024;
+            b_sent += recv_b;
         }
 #endif
         if (agt->buffer)

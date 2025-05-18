@@ -136,27 +136,28 @@ int dispatch_hre(hre_t* hre)
 
     mdebug1("Dispatching HRE: %ld, rule: %s", hre->timestamp, hre->rule->name);
 
-    if (hre->context == NULL)
+    /* create the HRE context */
+    pthread_mutex_lock(&log_mutex);
+    /* find the starting timestamp of the event window */
+    uint64_t window_start_idx = log_buffer_idx;
+    for (int i = (int)log_buffer_idx; i >= 0; i--)
     {
-        pthread_mutex_lock(&log_mutex);
-        /* find the starting timestamp of the event window */
-        uint64_t window_start_idx = log_buffer_idx;
-        for (int i = (int)log_buffer_idx; i >= 0; i--)
-        {
-            log_buffer_t* current = &log_buffer[i % MAX_LOG_DURATION];
-            // skip empty log buffers
-            if (current->timestamp == 0)
-                continue;
-            // check if the log buffer timestamp is within the event window
-            else if (window_start_time <= current->timestamp)
-                window_start_idx = i;
-            // timestamp is before the event window start
-            else if (current->timestamp < window_start_time)
-                break;
-        }
+        log_buffer_t* current = &log_buffer[i % MAX_LOG_DURATION];
+        // skip empty log buffers
+        if (current->timestamp == 0)
+            continue;
+        // check if the log buffer timestamp is within the event window
+        else if (window_start_time <= current->timestamp)
+            window_start_idx = i;
+        // timestamp is before the event window start
+        else if (current->timestamp < window_start_time)
+            break;
+    }
         mdebug2("Found HRE starting timestamp: %ld, index: %ld", window_start_time, window_start_idx);
 
         /* construct the context object */
+        char timestamp[DATE_LENGTH];
+        // json object to hold the context
         cJSON* context = cJSON_CreateObject();
         log_buffer_t* log_iter = NULL;
         for (uint64_t i = 0; i < MAX_LOG_DURATION; i++)
@@ -168,53 +169,67 @@ int dispatch_hre(hre_t* hre)
                 continue;
             // check if the log buffer is within the event window
             else if (log_iter->timestamp <= window_end_time)
-                // copy the log to the context
-                format_buffer2json(context, log_iter);
+            {
+                // copy the log into a json array
+                cJSON* tmp_log = format_buffer2json(context, log_iter);
+                // construct the timestamp string
+                strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S", localtime(&log_iter->timestamp));
+                cJSON_AddItemToObject(context, timestamp, tmp_log);
+            }
             else
                 break;
         }
         // buffer operations are done, unlock the mutex
         pthread_mutex_unlock(&log_mutex);
-        hre->context = cJSON_PrintUnformatted(context);
+        char* full_context = cJSON_PrintUnformatted(context);
         cJSON_Delete(context);
-    }
 
-    /* safeguard against huge context sizes*/
-    char* hre_json;
-    size_t context_len = strlen(hre->context);
-    if (context_len > MAX_CONTEXT_SIZE)
-    {
-        hre->context[context_len - 1] = '\0';
-    }
-    hre_json = format_hre_2json(hre, NULL);
+        /* OSSEC standard event format
+         * https://documentation.wazuh.com/4.10/development/message-format.html#standard-ossec-event
+         * Format:
+         * <Queue>:<Location>:<Message>
+         */
+        // construct the ossec format prefix
+        char prefix[32 + sizeof(DETECT_SOURCE_NAME)];
+        snprintf(prefix, sizeof(prefix), "%d:%s:", DETECT_WAZUH_ID, DETECT_SOURCE_NAME);
+        size_t prefix_len = strlen(prefix);
 
-    /* OSSEC standard event format
-     * https://documentation.wazuh.com/4.10/development/message-format.html#standard-ossec-event
-     * Format:
-     * <Queue>:<Location>:<Message>
-     */
-    // construct the ossec format prefix
-    char prefix[32 + sizeof(DETECT_SOURCE_NAME)];
-    snprintf(prefix, sizeof(prefix), "%d:%s:", DETECT_WAZUH_ID, DETECT_SOURCE_NAME);
-    size_t prefix_len = strlen(prefix);
+        /* safeguard against huge context sizes */
+        /* split the context into multiple batches */
+        char tmp[MAX_CONTEXT_SIZE];
+        tmp[MAX_CONTEXT_SIZE - 1] = '\0';
 
-    os_realloc(hre_json, strlen(hre_json) + prefix_len + 1, hre_json);
+        // use the local size limited copy of the context
+        hre->context = tmp;
 
-    // shift the json body to the right
-    memmove(hre_json + prefix_len, hre_json, strlen(hre_json) + 1);
-    // prepend the prefix
-    memcpy(hre_json, prefix, prefix_len);
+        char* hre_json;
+        size_t context_len = strlen(hre->context);
 
-    // queue the event for sending
-    w_agentd_state_update(INCREMENT_MSG_COUNT, NULL);
-    if (send_msg(hre_json, -1) < 0)
-        merror("Failed to send the HRE message.");
-    else
-        minfo("Dispatched HRE: %s", hre->rule->name);
+        for (size_t i; i < context_len; i += MAX_CONTEXT_SIZE - 1)
+        {
+            // copy a chunk of the context
+            memcpy(tmp, full_context + i, MIN(context_len, MAX_CONTEXT_SIZE - 1));
 
-    // free the event message
-    free(hre_json);
-    return 0;
+            // build HRE json object
+            hre_json = format_hre_2json(hre, NULL);
+            os_realloc(hre_json, strlen(hre_json) + prefix_len + 1, hre_json);
+            // shift the json body to the right
+            memmove(hre_json + prefix_len, hre_json, strlen(hre_json) + 1);
+            // prepend the prefix
+            memcpy(hre_json, prefix, prefix_len);
+
+            // queue the event for sending
+            w_agentd_state_update(INCREMENT_MSG_COUNT, NULL);
+            if (send_msg(hre_json, -1) < 0)
+                merror("Failed to send the HRE message.");
+            else
+                minfo("Dispatched HRE: %s", hre->rule->name);
+            // free the event message
+            free(hre_json);
+        }
+        // free the context
+        free(full_context);
+        return 0;
 }
 
 /**
@@ -256,10 +271,16 @@ detect_rule_t* scan_log(const char* entry, size_t len)
         merror("Invalid arguments to scan_log");
         return NULL;
     }
+    // skip ossec queue and location prefix, only match the message
+    // <Queue>:<Location>:<Message>
+    const char* message_loc = strchr(&entry[2], ':') + 1;
+    const char* match_msg = message_loc ? message_loc : entry;
+    // send message to detectmon
+
     // iterate over the rules and check if any of them match the entry
     for (int i = 0; rules[i] != NULL; i++)
     {
-        if (apply_rule(rules[i], entry, len) == 1)
+        if (apply_rule(rules[i], match_msg, len) == 1)
         {
             // rule matched, return the rule
             return rules[i];
@@ -411,7 +432,7 @@ detect_state_t insert_hre(hre_t* new_hre)
         if (num_hre() >= MAX_HRE)
         {
             // format the rule to JSON
-            cJSON* rule_json = format_rule2json(new_hre->rule);
+            cJSON* rule_json = format_rule2json_short(new_hre->rule);
             if (rule_json == NULL)
             {
                 mwarn("Failed to format rule to JSON.");

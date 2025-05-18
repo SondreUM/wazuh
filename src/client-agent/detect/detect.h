@@ -138,6 +138,15 @@ int detect_buffer_push(const char* entry, size_t size);
 cJSON* format_rule2json(detect_rule_t* rule);
 
 /**
+ * @brief Formats a detect_rule_t struct into a JSON object,
+ * omits the conditions field to prevent triggering rules with 'contain' keyword
+ *
+ * @param rule pointer to detect_rule_t struct to format
+ * @return cJSON* JSON object containing the formatted rule
+ */
+cJSON* format_rule2json_short(detect_rule_t* rule);
+
+/**
  * @brief Formats a log buffer into a JSON array
  *
  * @param array NULL or a cJSON array to append to

@@ -23,7 +23,9 @@
 #define OS_TEXT    1
 
 /* Size limit control */
+#define OS_SIZE_4194304  4194304
 #define OS_SIZE_1048576 1048576
+#define OS_SIZE_524288  524288
 #define OS_SIZE_65536   65536
 #define OS_SIZE_61440   61440
 #define OS_SIZE_32768   32768
@@ -48,8 +50,8 @@
 #define LOGLEVEL_INFO 1
 #define LOGLEVEL_DEBUG 0
 
-#define OS_MAXSTR       OS_SIZE_65536               /* Size for logs, sockets, etc      */
-#define OS_BUFFER_SIZE  OS_SIZE_2048                /* Size of general buffers          */
+#define OS_MAXSTR       OS_SIZE_1048576             /* Size for logs, sockets, etc      */
+#define OS_BUFFER_SIZE  OS_SIZE_4096                /* Size of general buffers          */
 #define OS_FLSIZE       OS_SIZE_256                 /* Maximum file size                */
 #define OS_HEADER_SIZE  OS_SIZE_128                 /* Maximum header size              */
 #define OS_LOG_HEADER   OS_SIZE_256                 /* Maximum log header size          */

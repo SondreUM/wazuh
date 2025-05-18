@@ -7,7 +7,3 @@ if(UNIT_TEST)
       add_subdirectory(benchmark)
     endif()
 endif()
-
-if (${TARGET} STREQUAL "server")
-    add_subdirectory(flatbuffers)
-endif()

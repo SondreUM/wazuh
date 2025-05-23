@@ -129,12 +129,11 @@ int dispatch_hre(hre_t* hre)
     // sanity check that window end time has passed
     if (window_end_time > time(NULL))
     {
-        merror("Trying to dispatch HRE: %ld, but the event window has not passed yet.", hre->timestamp);
-        pthread_mutex_unlock(&log_mutex);
+        mwarn("Trying to dispatch HRE: %ld, but the event window has not passed yet.", hre->timestamp);
         return -1;
     }
 
-    mdebug1("Dispatching HRE: %ld, rule: %s", hre->timestamp, hre->rule->name);
+    minfo("Dispatching HRE: %ld, rule: %s", hre->timestamp, hre->rule->name);
 
     /* create the HRE context */
     pthread_mutex_lock(&log_mutex);
@@ -192,6 +191,7 @@ int dispatch_hre(hre_t* hre)
         // construct the ossec format prefix
         char prefix[32 + sizeof(DETECT_SOURCE_NAME)];
         snprintf(prefix, sizeof(prefix), "%d:%s:", DETECT_WAZUH_ID, DETECT_SOURCE_NAME);
+        mdebug1("Context size: %ld, prefix size: %s", strlen(full_context), full_context);
         size_t prefix_len = strlen(prefix);
 
         /* safeguard against huge context sizes */
@@ -203,9 +203,9 @@ int dispatch_hre(hre_t* hre)
         hre->context = tmp;
 
         char* hre_json;
-        size_t context_len = strlen(hre->context);
+        size_t context_len = strlen(full_context);
 
-        for (size_t i; i < context_len; i += MAX_CONTEXT_SIZE - 1)
+        for (size_t i = 0; i < context_len; i += MAX_CONTEXT_SIZE - 1)
         {
             // copy a chunk of the context
             memcpy(tmp, full_context + i, MIN(context_len, MAX_CONTEXT_SIZE - 1));
@@ -217,6 +217,8 @@ int dispatch_hre(hre_t* hre)
             memmove(hre_json + prefix_len, hre_json, strlen(hre_json) + 1);
             // prepend the prefix
             memcpy(hre_json, prefix, prefix_len);
+
+            mdebug1("Dispatching HRE event: %s", hre_json);
 
             // queue the event for sending
             w_agentd_state_update(INCREMENT_MSG_COUNT, NULL);
@@ -271,16 +273,19 @@ detect_rule_t* scan_log(const char* entry, size_t len)
         merror("Invalid arguments to scan_log");
         return NULL;
     }
-    // skip ossec queue and location prefix, only match the message
+    // skip ossec location prefix, only match the message
     // <Queue>:<Location>:<Message>
-    const char* message_loc = strchr(&entry[2], ':') + 1;
-    const char* match_msg = message_loc ? message_loc : entry;
-    // send message to detectmon
+    const char* message_loc = strchr(entry, ':') + 1;
+    if (message_loc)
+    {
+        entry = message_loc;
+        len -= (message_loc - entry);
+    }
 
     // iterate over the rules and check if any of them match the entry
     for (int i = 0; rules[i] != NULL; i++)
     {
-        if (apply_rule(rules[i], match_msg, len) == 1)
+        if (apply_rule(rules[i], entry, len) == 1)
         {
             // rule matched, return the rule
             return rules[i];

@@ -37,17 +37,23 @@ void* EventForward()
     {
         msg[recv_b] = '\0';
 #ifdef DYNAMIC_DETECT
-        if (recv_b > 0)
+        if (recv_b > 0 || strlen(msg) > 0)
         {
+            // len = -1 may be used for null terminated strings
+            if (recv_b < 2)
+                recv_b = (long)w_strlen(msg);
+
+            // send message to detectmon
+            detect_buffer_push(&msg[2], recv_b - 2);
+
             // skip ossec queue and location prefix, only match the message
             // <Queue>:<Location>:<Message>
             const char* message_loc = strchr(&msg[2], ':') + 1;
             const char* match_msg = message_loc ? message_loc : msg;
-            // send message to detectmon
-            detect_buffer_push(msg + 2, recv_b - 2);
+            const size_t match_len = (message_loc ? recv_b - (message_loc - msg) : recv_b) - 2;
 
             // check if the message should be discarded
-            if (filter_log_check(match_msg, strnlen(match_msg, recv_b)) > 0)
+            if (filter_log_check(match_msg, match_len) > 0)
             {
                 b_filtered += recv_b;
                 mdebug2("Filtered message: %s", msg);

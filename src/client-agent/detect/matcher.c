@@ -5,6 +5,7 @@
 #include <sys/param.h>
 #include <sys/types.h>
 
+#include "regex_op.h"
 #include "rule.h"
 #include "shared.h"
 
@@ -22,17 +23,17 @@ static int matcher(detect_rule_condition_t* rule_condition, const char* message,
         return -1;
     }
 
-    regex_t regex;
+    size_t pattern_len = strlen(rule_condition->pattern);
     switch (rule_condition->matcher)
     {
         case STARTSWITH:
-            if (strncmp(message, rule_condition->pattern, MIN(len, strlen(rule_condition->pattern))) == 0)
+            if (strncmp(message, rule_condition->pattern, pattern_len) == 0)
             {
                 return 1;
             }
             break;
         case ENDSWITH:
-            if (strcmp(message + strlen(message) - strlen(rule_condition->pattern), rule_condition->pattern) == 0)
+            if (strncmp(message + len - pattern_len, rule_condition->pattern, pattern_len) == 0)
             {
                 return 1;
             }
@@ -45,12 +46,7 @@ static int matcher(detect_rule_condition_t* rule_condition, const char* message,
             break;
         case REGEX:
         {
-            if (regcomp(&regex, rule_condition->pattern, 0) != 0)
-            {
-                merror("Invalid regex");
-                return -1;
-            }
-            if (regexec(&regex, message, 0, NULL, 0) == 0)
+            if (OS_PRegex(message, rule_condition->pattern) == 1)
             {
                 return 1;
             }

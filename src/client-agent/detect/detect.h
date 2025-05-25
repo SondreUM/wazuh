@@ -6,7 +6,7 @@
 #include "state.h"
 
 /* detection definitions  */
-#define DETECT_VERSION "v0.4.0"
+#define DETECT_VERSION "v0.5.8"
 // Maximum number of HREs to process concurrently
 #define MAX_HRE 3
 // Maximum duration of the log buffer in seconds

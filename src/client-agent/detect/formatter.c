@@ -21,7 +21,7 @@ inline static const char* matcher_to_string(match_rule_t matcher)
 
 cJSON* format_buffer2json(cJSON* array, log_buffer_t* log_buffer)
 {
-    if (!log_buffer || log_buffer->cursor == 0)
+    if (!log_buffer || log_buffer->cursor == 0 || log_buffer->buffer == NULL)
         return NULL;
 
     if (array == NULL)

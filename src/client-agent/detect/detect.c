@@ -117,9 +117,11 @@ void delete_hre(hre_t* hre)
         }
     }
 
-    free(hre->event_trigger);
-    free(hre->context);
-    free(hre);
+    if (hre->event_trigger != NULL)
+        os_free(hre->event_trigger);
+    if (hre->context != NULL)
+        os_free(hre->context);
+    os_free(hre);
 }
 
 int dispatch_hre(hre_t* hre)
@@ -229,9 +231,12 @@ int dispatch_hre(hre_t* hre)
             // free the event message
             free(hre_json);
         }
-        // free the context
-        free(full_context);
-        return 0;
+    }
+    // free the context
+    free(full_context);
+    // remove local context pointer
+    hre->context = NULL;
+    return 0;
 }
 
 /**

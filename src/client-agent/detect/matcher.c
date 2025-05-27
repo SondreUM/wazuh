@@ -67,7 +67,7 @@ int apply_rule(detect_rule_t* rule, const char* message, size_t len)
 
     if (rule->conditions == NULL)
     {
-        mwarn("No conditions to apply");
+        mwarn("No conditions to apply for rule %s", rule->name);
         return 0;
     }
 

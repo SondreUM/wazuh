@@ -57,10 +57,16 @@ void* EventForward()
             {
                 b_filtered += recv_b;
                 mdebug2("Filtered message: %s", msg);
-                minfo("Filtered %ld B, sent %ld B", b_filtered, b_sent);
                 continue;
             }
             b_sent += recv_b;
+            // log statistics periodically
+            if (b_sent >= OS_SIZE_20480 || b_filtered >= OS_SIZE_20480)
+            {
+                minfo("Sent %lu B, filtered %lu B", b_sent, b_filtered);
+                b_sent = 0;
+                b_filtered = 0;
+            }
         }
 #endif
         if (agt->buffer)

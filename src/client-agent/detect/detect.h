@@ -6,7 +6,7 @@
 #include "state.h"
 
 /* detection definitions  */
-#define DETECT_VERSION "v0.5.8"
+#define DETECT_VERSION "v0.6.0"
 // Maximum number of HREs to process concurrently
 #define MAX_HRE 3
 // Maximum duration of the log buffer in seconds
@@ -18,7 +18,7 @@
 #define DETECT_RULE_DIRECTORY "/var/ossec/etc/detect"
 // Maximum size of the context string
 // Should be as large as possible but must fit the HRE JSON string in addition
-#define MAX_CONTEXT_SIZE (OS_MAXSTR - (OS_BUFFER_SIZE * 2))
+#define MAX_CONTEXT_SIZE (OS_MAXSTR - OS_SIZE_8192)
 // source name for the detection agent
 #define DETECT_SOURCE_NAME "detectmon"
 
